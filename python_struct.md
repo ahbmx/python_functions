@@ -513,4 +513,161 @@ To use this package, you would:
 2. Add all the Python files
 3. Run `main_script.py` or import the modules as needed
 
+
+To create multiple directories defined in `config.py` using a function in `functionHelper.py`, here's how you should implement it:
+
+## 1. First, update `config.py` to separate directory definitions
+
+```python
+# dvl/config.py
+from pathlib import Path
+
+# Base directory
+BASE_DIR = Path(__file__).parent.parent
+
+# Directory definitions (without creation)
+DIRECTORIES = {
+    'LOG_DIR': BASE_DIR / 'logs',
+    'DATA_DIR': BASE_DIR / 'data',
+    'OUTPUT_DIR': BASE_DIR / 'output',
+    'REPORTS_DIR': BASE_DIR / 'reports',
+    'TEMP_DIR': BASE_DIR / 'temp'
+}
+
+# Other existing configuration remains the same...
+LOG_FILE = DIRECTORIES['LOG_DIR'] / 'app.log'
+PMAX_CONFIG = {...}
+# etc...
+```
+
+## 2. Add the directory creation function to `functionHelper.py`
+
+```python
+# dvl/functionHelper.py
+import logging
+from pathlib import Path
+from typing import Dict, Union
+from .config import DIRECTORIES
+
+def create_directories(logger: logging.Logger = None) -> Dict[str, Path]:
+    """
+    Create all directories defined in config.DIRECTORIES
+    
+    Args:
+        logger: Optional logger instance for logging creation results
+    
+    Returns:
+        Dictionary of created directory paths
+    """
+    created_dirs = {}
+    
+    for name, path in DIRECTORIES.items():
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            created_dirs[name] = path
+            if logger:
+                logger.debug(f"Directory {name} created/verified at {path}")
+        except Exception as e:
+            if logger:
+                logger.error(f"Failed to create directory {name} at {path}: {str(e)}")
+            created_dirs[name] = None
+    
+    return created_dirs
+```
+
+## 3. Update `__init__.py` to expose the new function
+
+```python
+# dvl/__init__.py
+from .config import *
+from .functionHelper import setup_logging, create_directories
+# ... other imports ...
+
+__all__ = [
+    'setup_logging',
+    'create_directories',
+    # ... rest of your exports ...
+]
+```
+
+## 4. Usage Examples
+
+### Option 1: Use during package initialization
+Add to your `__init__.py`:
+
+```python
+# Initialize directories when package is imported
+_logger = setup_logging('dvl.init')
+create_directories(_logger)
+```
+
+### Option 2: Explicit call from main script
+In your `main_script.py`:
+
+```python
+from dvl import create_directories, setup_logging
+
+logger = setup_logging('main_script')
+create_directories(logger)
+```
+
+### Option 3: Use with existing helper initialization
+In your helper classes (like `PmaxHelper.__init__`):
+
+```python
+def __init__(self, log_to_file: bool = True):
+    self.logger = setup_logging('dvl.pmaxHelper', log_to_file)
+    create_directories(self.logger)  # Ensure directories exist
+    # ... rest of initialization ...
+```
+
+## Key Features of This Implementation:
+
+1. **Separation of Concerns**:
+   - `config.py` defines what directories should exist
+   - `functionHelper.py` handles the actual creation
+
+2. **Robust Error Handling**:
+   - Continues if one directory fails
+   - Provides detailed logging
+
+3. **Flexible Usage**:
+   - Can be called automatically or explicitly
+   - Works with or without logging
+
+4. **Parent Directory Creation**:
+   - Uses `parents=True` to create entire paths
+   - `exist_ok=True` prevents errors if directories exist
+
+5. **Reporting**:
+   - Returns dictionary showing which directories were created
+   - None values indicate failures
+
+## Alternative Implementation (More Functional Style)
+
+If you prefer a more functional approach, you could modify `functionHelper.py` like this:
+
+```python
+def ensure_directory_exists(path: Union[str, Path], logger: logging.Logger = None) -> bool:
+    """Ensure a single directory exists"""
+    try:
+        Path(path).mkdir(parents=True, exist_ok=True)
+        if logger:
+            logger.debug(f"Directory verified at {path}")
+        return True
+    except Exception as e:
+        if logger:
+            logger.error(f"Directory creation failed for {path}: {str(e)}")
+        return False
+
+def initialize_workspace(logger: logging.Logger = None) -> None:
+    """Create all required directories"""
+    for name, path in DIRECTORIES.items():
+        success = ensure_directory_exists(path, logger)
+        if not success and logger:
+            logger.warning(f"Critical directory {name} could not be created")
+```
+
+This alternative gives you more granular control but requires more explicit calls. Choose whichever approach better fits your use case.
+
 The logging will automatically include the module name in each log message and can be configured to log to both console and file.
