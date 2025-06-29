@@ -1,25 +1,28 @@
-Yes! We can automate connection handling using **context managers** (`with` statements) or **decorators** to avoid manually opening/closing connections. Here are improved versions of both modules with **auto-connection handling**:
+Here are the simplified versions of both modules **without typing** and with **hardcoded credentials**. Just replace the placeholder values (`your_username`, `your_password`, etc.) with your actual database credentials.
 
 ---
 
-# **1. `pymysql_functions.py` (Auto-Connection Handling)**
+# **1. `pymysql_helpers.py` (PyMySQL with Hardcoded Credentials)**
 ```python
 import pymysql
 from sqlalchemy import create_engine
 import pandas as pd
-from typing import List, Dict, Union, Optional, Callable
 from functools import wraps
 
-# --- Connection Handling ---
-def get_pymysql_engine(host: str, user: str, password: str, database: str):
-    """Returns a SQLAlchemy engine for Pandas."""
-    return create_engine(f"mysql+pymysql://{user}:{password}@{host}/{database}")
+# Hardcoded credentials (REPLACE THESE!)
+HOST = "localhost"
+USER = "your_username"
+PASSWORD = "your_password"
+DATABASE = "your_database"
 
-def with_pymysql_connection(func: Callable):
-    """Decorator to automatically handle PyMySQL connections."""
+# SQLAlchemy engine for Pandas
+engine = create_engine(f"mysql+pymysql://{USER}:{PASSWORD}@{HOST}/{DATABASE}")
+
+# Decorator to auto-handle connections
+def with_connection(func):
     @wraps(func)
-    def wrapper(host: str, user: str, password: str, database: str, *args, **kwargs):
-        conn = pymysql.connect(host=host, user=user, password=password, database=database)
+    def wrapper(*args, **kwargs):
+        conn = pymysql.connect(host=HOST, user=USER, password=PASSWORD, database=DATABASE)
         try:
             result = func(conn, *args, **kwargs)
             conn.commit()
@@ -32,81 +35,76 @@ def with_pymysql_connection(func: Callable):
     return wrapper
 
 # --- Table Operations ---
-@with_pymysql_connection
-def create_table(conn, table_name: str, columns: Dict[str, str], primary_key: Optional[str] = None):
-    """Creates a table. Example: {'id': 'INT', 'name': 'VARCHAR(50)'}"""
+@with_connection
+def create_table(conn, table_name, columns, primary_key=None):
     columns_sql = ", ".join([f"{col} {dtype}" for col, dtype in columns.items()])
     if primary_key:
         columns_sql += f", PRIMARY KEY ({primary_key})"
     with conn.cursor() as cursor:
         cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({columns_sql})")
 
-@with_pymysql_connection
-def drop_table(conn, table_name: str):
-    """Drops a table if it exists."""
+@with_connection
+def drop_table(conn, table_name):
     with conn.cursor() as cursor:
         cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
 
 # --- Query Execution ---
-@with_pymysql_connection
-def run_query(conn, query: str, params: Optional[tuple] = None):
-    """Executes INSERT/UPDATE/DELETE queries."""
+@with_connection
+def run_query(conn, query, params=None):
     with conn.cursor() as cursor:
         cursor.execute(query, params)
 
-@with_pymysql_connection
-def read_query(conn, query: str, params: Optional[tuple] = None) -> List[tuple]:
-    """Returns query results as a list of tuples."""
+@with_connection
+def read_query(conn, query, params=None):
     with conn.cursor() as cursor:
         cursor.execute(query, params)
         return cursor.fetchall()
 
-@with_pymysql_connection
-def read_query_dict(conn, query: str, params: Optional[tuple] = None) -> List[dict]:
-    """Returns query results as a list of dictionaries."""
+@with_connection
+def read_query_dict(conn, query, params=None):
     with conn.cursor(pymysql.cursors.DictCursor) as cursor:
         cursor.execute(query, params)
         return cursor.fetchall()
 
-def read_query_dataframe(engine, query: str) -> pd.DataFrame:
-    """Returns query results as a Pandas DataFrame."""
+def read_query_dataframe(query):
     return pd.read_sql(query, engine)
 
 # --- Indexes & Keys ---
-@with_pymysql_connection
-def create_index(conn, table_name: str, index_name: str, columns: Union[str, List[str]]):
-    """Creates an index. Example: create_index(..., 'idx_name', ['col1', 'col2'])"""
+@with_connection
+def create_index(conn, table_name, index_name, columns):
     if isinstance(columns, list):
         columns = ", ".join(columns)
     run_query(conn, f"CREATE INDEX {index_name} ON {table_name} ({columns})")
 
-@with_pymysql_connection
-def add_foreign_key(conn, table: str, column: str, ref_table: str, ref_column: str, constraint_name: Optional[str] = None):
-    """Adds a foreign key constraint."""
+@with_connection
+def add_foreign_key(conn, table, column, ref_table, ref_column, constraint_name=None):
     constraint = f"CONSTRAINT {constraint_name}" if constraint_name else ""
     run_query(conn, f"ALTER TABLE {table} ADD {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column})")
 ```
 
 ---
 
-# **2. `mysqlconnector_functions.py` (Auto-Connection Handling)**
+# **2. `mysqlconnector_helpers.py` (MySQL Connector with Hardcoded Credentials)**
 ```python
 import mysql.connector
 from sqlalchemy import create_engine
 import pandas as pd
-from typing import List, Dict, Union, Optional, Callable
 from functools import wraps
 
-# --- Connection Handling ---
-def get_mysql_connector_engine(host: str, user: str, password: str, database: str):
-    """Returns a SQLAlchemy engine for Pandas."""
-    return create_engine(f"mysql+mysqlconnector://{user}:{password}@{host}/{database}")
+# Hardcoded credentials (REPLACE THESE!)
+HOST = "localhost"
+USER = "your_username"
+PASSWORD = "your_password"
+DATABASE = "your_database"
 
-def with_mysql_connector_connection(func: Callable):
-    """Decorator to automatically handle mysql.connector connections."""
+# SQLAlchemy engine for Pandas
+engine = create_engine(f"mysql+mysqlconnector://{USER}:{PASSWORD}@{HOST}/{DATABASE}")
+
+# Decorator to auto-handle connections
+def with_connection(func):
     @wraps(func)
-    def wrapper(host: str, user: str, password: str, database: str, *args, **kwargs):
-        conn = mysql.connector.connect(host=host, user=user, password=password, database=database)
+    def wrapper(*args, **kwargs):
+        conn = mysql.connector.connect(host=HOST, user=USER, password=PASSWORD, database=DATABASE)
         try:
             result = func(conn, *args, **kwargs)
             conn.commit()
@@ -119,57 +117,49 @@ def with_mysql_connector_connection(func: Callable):
     return wrapper
 
 # --- Table Operations ---
-@with_mysql_connector_connection
-def create_table(conn, table_name: str, columns: Dict[str, str], primary_key: Optional[str] = None):
-    """Creates a table."""
+@with_connection
+def create_table(conn, table_name, columns, primary_key=None):
     columns_sql = ", ".join([f"{col} {dtype}" for col, dtype in columns.items()])
     if primary_key:
         columns_sql += f", PRIMARY KEY ({primary_key})"
     with conn.cursor() as cursor:
         cursor.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({columns_sql})")
 
-@with_mysql_connector_connection
-def drop_table(conn, table_name: str):
-    """Drops a table if it exists."""
+@with_connection
+def drop_table(conn, table_name):
     with conn.cursor() as cursor:
         cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
 
 # --- Query Execution ---
-@with_mysql_connector_connection
-def run_query(conn, query: str, params: Optional[tuple] = None):
-    """Executes INSERT/UPDATE/DELETE queries."""
+@with_connection
+def run_query(conn, query, params=None):
     with conn.cursor() as cursor:
         cursor.execute(query, params)
 
-@with_mysql_connector_connection
-def read_query(conn, query: str, params: Optional[tuple] = None) -> List[tuple]:
-    """Returns query results as a list of tuples."""
+@with_connection
+def read_query(conn, query, params=None):
     with conn.cursor() as cursor:
         cursor.execute(query, params)
         return cursor.fetchall()
 
-@with_mysql_connector_connection
-def read_query_dict(conn, query: str, params: Optional[tuple] = None) -> List[dict]:
-    """Returns query results as a list of dictionaries."""
+@with_connection
+def read_query_dict(conn, query, params=None):
     with conn.cursor(dictionary=True) as cursor:
         cursor.execute(query, params)
         return cursor.fetchall()
 
-def read_query_dataframe(engine, query: str) -> pd.DataFrame:
-    """Returns query results as a Pandas DataFrame."""
+def read_query_dataframe(query):
     return pd.read_sql(query, engine)
 
 # --- Indexes & Keys ---
-@with_mysql_connector_connection
-def create_index(conn, table_name: str, index_name: str, columns: Union[str, List[str]]):
-    """Creates an index on specified columns."""
+@with_connection
+def create_index(conn, table_name, index_name, columns):
     if isinstance(columns, list):
         columns = ", ".join(columns)
     run_query(conn, f"CREATE INDEX {index_name} ON {table_name} ({columns})")
 
-@with_mysql_connector_connection
-def add_foreign_key(conn, table: str, column: str, ref_table: str, ref_column: str, constraint_name: Optional[str] = None):
-    """Adds a foreign key constraint."""
+@with_connection
+def add_foreign_key(conn, table, column, ref_table, ref_column, constraint_name=None):
     constraint = f"CONSTRAINT {constraint_name}" if constraint_name else ""
     run_query(conn, f"ALTER TABLE {table} ADD {constraint} FOREIGN KEY ({column}) REFERENCES {ref_table}({ref_column})")
 ```
@@ -177,77 +167,59 @@ def add_foreign_key(conn, table: str, column: str, ref_table: str, ref_column: s
 ---
 
 # **Usage Examples**
-### **1. PyMySQL (No Manual Connection Handling!)**
+### **1. PyMySQL (No Credentials Needed in Calls!)**
 ```python
-import pymysql_functions as pymysql
+import pymysql_helpers as db
 
-# Configure once
-DB_CONFIG = {
-    "host": "localhost",
-    "user": "your_user",
-    "password": "your_password",
-    "database": "your_db"
-}
-
-# Auto-connection example (no conn.close() needed!)
-pymysql.create_table(**DB_CONFIG, 
+# Create a table
+db.create_table(
     table_name="users",
     columns={"id": "INT AUTO_INCREMENT", "name": "VARCHAR(50)"},
     primary_key="id"
 )
 
 # Insert data
-pymysql.run_query(**DB_CONFIG, 
-    query="INSERT INTO users (name) VALUES ('Alice')"
-)
+db.run_query("INSERT INTO users (name) VALUES ('Alice')")
 
-# Fetch results
-users = pymysql.read_query_dict(**DB_CONFIG, 
-    query="SELECT * FROM users"
-)
+# Fetch data
+users = db.read_query_dict("SELECT * FROM users")
 print(users)
+
+# Pandas DataFrame
+df = db.read_query_dataframe("SELECT * FROM users")
+print(df)
 ```
 
-### **2. MySQL Connector (Same Clean Syntax)**
+### **2. MySQL Connector (Identical API)**
 ```python
-import mysqlconnector_functions as mysql
+import mysqlconnector_helpers as db
 
-DB_CONFIG = {
-    "host": "localhost",
-    "user": "your_user",
-    "password": "your_password",
-    "database": "your_db"
-}
-
-# All functions auto-handle connections!
-mysql.create_table(**DB_CONFIG,
+# All functions work the same way!
+db.create_table(
     table_name="products",
     columns={"id": "INT AUTO_INCREMENT", "name": "TEXT"},
     primary_key="id"
 )
 
-# Pandas integration
-engine = mysql.get_mysql_connector_engine(**DB_CONFIG)
-df = mysql.read_query_dataframe(engine, "SELECT * FROM products")
+df = db.read_query_dataframe("SELECT * FROM products")
 ```
 
 ---
 
-# **Key Improvements**
-1. **No Manual Connection Handling**  
-   - Decorators (`@with_*_connection`) automatically manage:  
-     - Connection opening/closing  
-     - Commits on success  
-     - Rollbacks on errors  
+# **Key Features**
+1. **No Credentials in Function Calls**  
+   - Credentials are hardcoded at the top of each module.  
 
-2. **Cleaner API**  
-   - Pass database credentials once (e.g., `**DB_CONFIG`)  
-   - No more `conn` clutter in your business logic  
+2. **Auto-Connection Handling**  
+   - Decorators manage connections (open/close/commit/rollback).  
 
-3. **Safety**  
-   - Guaranteed connection cleanup (even if errors occur)  
+3. **Simplified API**  
+   - No `conn` or `engine` passing required.  
 
-4. **Unified Workflow**  
-   - Both modules work identically (just switch the import)  
+4. **Drop-in Replacement**  
+   - Switch between PyMySQL and MySQL Connector by changing the import.  
 
-Choose either module based on your preferred driver! 🚀
+5. **No `typing` Module**  
+   - Removed all type hints for compatibility with older Python versions.  
+
+Replace the credentials at the top of each file, and you’re ready to go! 🚀
