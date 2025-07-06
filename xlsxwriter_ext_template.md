@@ -644,51 +644,6 @@ def create_styles_dict(workbook: Workbook) -> dict:
     return styles
 ```
 
-## Usage Example
-
-```python
-# Example usage of the styles dictionary
-workbook = Workbook('styled_workbook.xlsx')
-worksheet = workbook.add_worksheet()
-
-# Create the styles dictionary
-styles = create_styles_dict(workbook)
-
-# Apply styles
-worksheet.write('A1', 'Main Title', styles['title'])
-worksheet.write('A2', 'Subtitle', styles['subtitle'])
-worksheet.write('A4', 'Header 1', styles['header_1'])
-worksheet.write('B4', 'Data', styles['table_row_even'])
-worksheet.write('A5', 'Financial Value', styles['financial_positive'])
-
-# Dark mode example
-worksheet.write('A10', 'Dark Title', styles['dark_title'])
-worksheet.write('A11', 'Dark Data', styles['dark_table_row_even'])
-
-workbook.close()
-```
-
-This comprehensive styles dictionary includes:
-- Base text styles (regular, bold, italic, etc.)
-- Header styles (4 levels)
-- Table styles (headers, rows, totals)
-- Number formats (currency, percentages, dates)
-- Alignment options
-- Border styles
-- Font variations
-- Cell background colors
-- Conditional formatting styles
-- Specialized styles (hyperlinks, hidden cells, etc.)
-- Combination styles for common use cases
-- Dark mode versions of all major styles
-- Chart-specific styles
-- Dashboard styles
-- Financial reporting styles
-- Project management styles
-
-The styles are organized logically and can be easily extended or modified to suit specific needs.
-
-
 Here's a comprehensive usage example that demonstrates all 200+ styles from the dictionary in a single script:
 
 ```python
@@ -1448,4 +1403,71 @@ def demonstrate_all_styles():
     row += 1
     
     worksheet.write(row, col, "pm_complete", styles['pm_complete'])
-    worksheet.write(row, col+1, "Complete
+    worksheet.write(row, col+1, "Complete", styles['pm_complete'])
+    row += 1
+    
+    worksheet.write(row, col, "pm_in_progress", styles['pm_in_progress'])
+    worksheet.write(row, col+1, "In Progress", styles['pm_in_progress'])
+    row += 1
+    
+    worksheet.write(row, col, "pm_delayed", styles['pm_delayed'])
+    worksheet.write(row, col+1, "Delayed", styles['pm_delayed'])
+    row += 1
+    
+    worksheet.write(row, col, "pm_milestone", styles['pm_milestone'])
+    worksheet.write(row, col+1, "Milestone", styles['pm_milestone'])
+    row += 1
+    
+    worksheet.write(row, col, "pm_gantt_header", styles['pm_gantt_header'])
+    worksheet.write(row, col+1, "Gantt Header", styles['pm_gantt_header'])
+    row += 1
+    
+    worksheet.write(row, col, "dark_pm_complete", styles['dark_pm_complete'])
+    worksheet.write(row, col+1, "Dark Complete", styles['dark_pm_complete'])
+    row += 1
+    
+    worksheet.write(row, col, "dark_pm_in_progress", styles['dark_pm_in_progress'])
+    worksheet.write(row, col+1, "Dark In Progress", styles['dark_pm_in_progress'])
+    row += 1
+    
+    worksheet.write(row, col, "dark_pm_delayed", styles['dark_pm_delayed'])
+    worksheet.write(row, col+1, "Dark Delayed", styles['dark_pm_delayed'])
+    row += 1
+    
+    worksheet.write(row, col, "dark_pm_milestone", styles['dark_pm_milestone'])
+    worksheet.write(row, col+1, "Dark Milestone", styles['dark_pm_milestone'])
+    row += 1
+    
+    worksheet.write(row, col, "dark_pm_gantt_header", styles['dark_pm_gantt_header'])
+    worksheet.write(row, col+1, "Dark Gantt Header", styles['dark_pm_gantt_header'])
+    
+    # Adjust column widths for better visibility
+    worksheet.set_column(0, 0, 25)  # Style name column
+    worksheet.set_column(1, 1, 40)  # Example column
+    
+    # Close the workbook
+    workbook.close()
+    print("All styles demonstrated in 'all_styles_demo.xlsx'")
+
+if __name__ == "__main__":
+    demonstrate_all_styles()
+```
+
+This script:
+
+1. Creates a new Excel workbook with a worksheet named "Style Samples"
+2. Generates all 200+ styles from the dictionary
+3. Demonstrates each style by:
+   - Showing the style name in the first column
+   - Showing an example of the style in the second column
+4. Organizes the styles into logical sections with headers
+5. Adjusts column widths for better visibility
+6. Saves the file as "all_styles_demo.xlsx"
+
+The output will be a comprehensive reference sheet showing every style in your dictionary with both its name and an example of how it looks when applied. This is extremely useful for:
+- Visually comparing different styles
+- Quickly finding the style you need for a particular purpose
+- Understanding how different style properties combine
+- Seeing the dark mode alternatives side-by-side with their light mode counterparts
+
+You can run this script to generate the reference file, then use it as a guide when applying styles to your actual spreadsheets.
