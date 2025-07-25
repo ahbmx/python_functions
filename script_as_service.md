@@ -140,6 +140,7 @@ if __name__ == "__main__":
 
 ## Systemd Service File Update
 
+```bash
 sudo nano /etc/systemd/system/capacity-monitor.service
 sudo systemctl daemon-reload
 sudo systemctl enable capacity-monitor.service
@@ -150,7 +151,7 @@ sudo systemctl status capacity-monitor.service
 journalctl -u capacity-monitor.service -f
 
 sudo pip3 install schedule
-
+```
 You might want to update your systemd service file to ensure proper log directory permissions:
 
 ```ini
