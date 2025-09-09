@@ -1,0 +1,169 @@
+#NoEnv
+#SingleInstance Force
+SendMode Input
+SetWorkingDir %A_ScriptDir%
+
+; --- Paths ---
+configDir := A_ScriptDir . "\configuration"
+configFile := configDir . "\config.ini"
+
+; --- Ensure config dir ---
+if !FileExist(configDir)
+    FileCreateDir, %configDir%
+
+; --- Create default config if missing ---
+if !FileExist(configFile)
+{
+    FileAppend,
+(
+[Categories]
+1=Websites
+2=Tools
+
+[Websites]
+Google (chrome)=https://www.google.com,chrome
+Google (edge)=https://www.google.com,edge
+
+[Tools]
+Notepad=notepad.exe
+Calculator=calc.exe
+), %configFile%
+}
+
+; --- Load settings ---
+;IniRead, guiWidth, %configFile%, Settings, Width, 600
+;IniRead, guiHeight, %configFile%, Settings, Height, 800
+;IniRead, alwaysOnTop, %configFile%, Settings, AlwaysOnTop, 1
+
+guiHeight=900
+guiWidth=300
+btnWidth := guiWidth - 40
+alwaysOnTop=1
+
+; --- Load categories into an array and tab list string ---
+categories := []
+tabList := ""
+IniRead, catList, %configFile%, Categories
+Loop, Parse, catList, `n, `r
+{
+    if A_LoopField =
+        continue
+    StringSplit, parts, A_LoopField, =
+    categories.Push(parts2)
+    tabList .= parts2 "|"
+}
+StringTrimRight, tabList, tabList, 1  ; remove trailing |
+
+; --- Build GUI ---
+Gui, Launcher:New
+Gui, Launcher:Default
+Gui, +Resize +MinSize
+if (alwaysOnTop)
+    Gui, +AlwaysOnTop
+
+Gui, Add, CheckBox, vAlwaysOnTopCB gToggleAlwaysOnTop Checked%alwaysOnTop%, Always on Top
+Gui, Add, Tab2, vMainTab w%guiWidth% h%guiHeight%, %tabList%
+
+global itemMap := {}
+
+; --- Add tab content ---
+for index, category in categories
+{
+    Gui, Tab, %category%
+    IniRead, entries, %configFile%, %category%
+    Loop, Parse, entries, `n, `r
+    {
+        if A_LoopField =
+            continue
+        StringSplit, itemParts, A_LoopField, =
+        btnText := itemParts1
+        btnValue := itemParts2
+        btnID := category . "_" . A_Index
+        Gui, Add, Button, gLaunchItem v%btnID% w%btnWidth%, %btnText%
+        itemMap[btnID] := btnValue
+    }
+}
+Gui, Tab
+
+; --- Show GUI ---
+Gui, Show, w%guiWidth% h%guiHeight%, Quick Launcher
+return
+
+; ----------------------------
+; --- Toggle Always on Top ---
+; ----------------------------
+ToggleAlwaysOnTop:
+GuiControlGet, checked,, AlwaysOnTopCB
+if checked {
+    Gui, +AlwaysOnTop
+    IniWrite, 1, %configFile%, Settings, AlwaysOnTop
+} else {
+    Gui, -AlwaysOnTop
+    IniWrite, 0, %configFile%, Settings, AlwaysOnTop
+}
+return
+
+; ----------------------------
+; --- Button Launch Handler ---
+; ----------------------------
+LaunchItem:
+GuiControlGet, FocusCtrl, FocusV
+if !FocusCtrl
+    return
+
+data := itemMap[FocusCtrl]
+
+if InStr(data, "http") || InStr(data, "www.")
+{
+    StringSplit, urlParts, data, `,
+    url := urlParts1
+    browser := urlParts2
+
+    if (browser = "chrome")
+        Run, chrome.exe "%url%"
+    else if (browser = "edge")
+        Run, msedge.exe "%url%"
+    else
+        Run, %url%
+}
+else
+{
+    Run, %data%
+}
+return
+
+; ----------------------------
+; --- Toggle GUI Win+F11 ---
+; ----------------------------
+#F11::
+IfWinExist, App & URL Launcher
+{
+    if WinActive("App & URL Launcher")
+        Gui, Hide
+    else
+        Gui, Show
+}
+return
+
+; ----------------------------
+; --- Hotkeys & Hotstrings ---
+; ----------------------------
+
+; Ctrl+Alt+T: Task Manager
+^!t::Run, taskmgr.exe
+
+; Hotstring: brb
+::brb::be right back
+
+; Hotstring: sig
+::@sig::
+(
+Best regards,
+John Doe
+)
+
+; ----------------------------
+; --- Exit Handler ---
+; ----------------------------
+GuiClose:
+ExitApp
