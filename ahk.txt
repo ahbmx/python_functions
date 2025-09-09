@@ -150,6 +150,8 @@ return
 ; ----------------------------
 ; --- Hotkeys & Hotstrings ---
 ; ----------------------------
+; Ctrl+Alt+R: Reload 
+^!r::Reload  ; Ctrl + Alt + R
 
 ; Ctrl+Alt+T: Task Manager
 ^!t::Run, taskmgr.exe
