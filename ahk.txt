@@ -3,6 +3,8 @@
 SendMode Input
 SetWorkingDir %A_ScriptDir%
 
+global guiVisible := true
+
 ; --- Paths ---
 configDir := A_ScriptDir . "\configuration"
 configFile := configDir . "\config.ini"
@@ -136,12 +138,12 @@ return
 ; --- Toggle GUI Win+F11 ---
 ; ----------------------------
 #F11::
-IfWinExist, App & URL Launcher
-{
-    if WinActive("App & URL Launcher")
-        Gui, Hide
-    else
-        Gui, Show
+if guiVisible {
+    Gui, Launcher:Hide
+    guiVisible := false
+} else {
+    Gui, Launcher:Show, w%guiWidth% h%guiHeight%, Quick Launcher
+    guiVisible := true
 }
 return
 
