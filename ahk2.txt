@@ -1,0 +1,126 @@
+; AutoHotkey v1 script with configurable window size and wide buttons
+
+#NoEnv
+SendMode Input
+SetWorkingDir %A_ScriptDir%
+
+; -- CONFIGURATION --
+winWidth := 300   ; Window width in pixels
+winHeight := 500  ; Initial height (can auto-expand too)
+btnWidth := winWidth - 20  ; Button width (padding for margins)
+
+chromePath := "C:\Program Files\Google\Chrome\Application\chrome.exe"
+edgePath := "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+puttyPath := "C:\Program Files\PuTTY\putty.exe"
+puttySession := "MySessionName"
+puttyHost := "user@192.168.1.100"
+
+visible := true  ; Track window visibility
+
+; -- BUILD GUI --
+Gui, +AlwaysOnTop
+Gui, Add, Checkbox, vAlwaysOnTopCheckbox gToggleAlwaysOnTop Checked, Always on Top
+
+Gui, Add, Text,, === Applications ===
+Gui, Add, Button, w%btnWidth% gOpenNotepad, Notepad
+Gui, Add, Button, w%btnWidth% gOpenChrome, Chrome
+Gui, Add, Button, w%btnWidth% gOpenPuTTY, PuTTY
+
+Gui, Add, Text,, === Websites (Default Browser) ===
+Gui, Add, Button, w%btnWidth% gOpenOpenAI_Default, OpenAI (Default)
+Gui, Add, Button, w%btnWidth% gOpenGitHub_Default, GitHub (Default)
+
+Gui, Add, Text,, === Websites (Chrome) ===
+Gui, Add, Button, w%btnWidth% gOpenOpenAI_Chrome, OpenAI (Chrome)
+Gui, Add, Button, w%btnWidth% gOpenGitHub_Chrome, GitHub (Chrome)
+
+Gui, Add, Text,, === Websites (Edge) ===
+Gui, Add, Button, w%btnWidth% gOpenOpenAI_Edge, OpenAI (Edge)
+Gui, Add, Button, w%btnWidth% gOpenGitHub_Edge, GitHub (Edge)
+
+Gui, Show, w%winWidth% h%winHeight%, My Toolbar
+return
+
+; === TOGGLE GUI VISIBILITY: Win + F11 ===
+#F11::
+if (visible) {
+    Gui, Hide
+    visible := false
+} else {
+    Gui, Show
+    visible := true
+}
+return
+
+; === TOGGLE ALWAYS-ON-TOP ===
+ToggleAlwaysOnTop:
+Gui, Submit, NoHide
+if (AlwaysOnTopCheckbox)
+    Gui, +AlwaysOnTop
+else
+    Gui, -AlwaysOnTop
+return
+
+; === APP BUTTONS ===
+OpenNotepad:
+Run, notepad.exe
+return
+
+OpenChrome:
+Run, %chromePath%
+return
+
+OpenPuTTY:
+; Run saved session
+; Run, "%puttyPath%" -load "%puttySession%"
+; Or direct SSH
+Run, "%puttyPath%" -ssh %puttyHost%
+return
+
+; === DEFAULT BROWSER LINKS ===
+OpenOpenAI_Default:
+Run, https://openai.com
+return
+
+OpenGitHub_Default:
+Run, https://github.com
+return
+
+; === CHROME LINKS ===
+OpenOpenAI_Chrome:
+Run, "%chromePath%" "https://openai.com"
+return
+
+OpenGitHub_Chrome:
+Run, "%chromePath%" "https://github.com"
+return
+
+; === EDGE LINKS ===
+OpenOpenAI_Edge:
+Run, "%edgePath%" "https://openai.com"
+return
+
+OpenGitHub_Edge:
+Run, "%edgePath%" "https://github.com"
+return
+
+; === GLOBAL HOTKEYS ===
+^!n::  ; Ctrl + Alt + N
+Run, notepad.exe
+return
+
+^!p::  ; Ctrl + Alt + P
+Run, "%puttyPath%" -ssh %puttyHost%
+return
+
+^!o::  ; Ctrl + Alt + O
+Run, "%chromePath%" "https://openai.com"
+return
+
+^!g::  ; Ctrl + Alt + G
+Run, "%edgePath%" "https://github.com"
+return
+
+; === EXIT ON CLOSE ===
+GuiClose:
+ExitApp
