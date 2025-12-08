@@ -1,18 +1,17 @@
-Perfect! If the YAML structure is always like this and the password is always in a **single, predictable field**, we can simplify the script a lot. No recursion is needed.
-
-Here’s a minimal script for your YAML format:
-
 ```python
 import yaml
 import base64
+import hashlib
 from cryptography.fernet import Fernet
 
 ST_TOKEN = "my_secret_password"  # your token/password
 
-# Generate Fernet object from token
+# Generate Fernet object from token using SHA256
 def get_fernet(password: str) -> Fernet:
-    # Fernet key must be 32 bytes base64-encoded
-    key = base64.urlsafe_b64encode(password.encode().ljust(32, b'\0'))
+    # Hash the password to get 32 bytes
+    hash_bytes = hashlib.sha256(password.encode()).digest()
+    # Base64 encode for Fernet
+    key = base64.urlsafe_b64encode(hash_bytes)
     return Fernet(key)
 
 fernet = get_fernet(ST_TOKEN)
@@ -50,16 +49,43 @@ if __name__ == "__main__":
     print("Decrypted YAML:", decrypted_data)
 ```
 
----
 
-### ✅ How it works:
+Here’s a minimal example for another script that reads `data_encrypted.yaml` and returns all device details with decrypted passwords:
 
-1. Only the **`password` field** under `devices` is encrypted.
-2. Deterministic encryption using your `ST_TOKEN`.
-3. YAML structure remains unchanged and readable for all other fields.
+```python
+import yaml
+import base64
+import hashlib
+from cryptography.fernet import Fernet
 
-This is simple, clean, and matches exactly your format.
+ST_TOKEN = "my_secret_password"  # same token used to encrypt
 
-If you want, I can also add a **one-liner `ENC(...)` marker** around encrypted passwords so you can clearly see which values are encrypted. This is useful if you want to mix plaintext and encrypted YAML.
+# Generate Fernet object from password
+def get_fernet(password: str) -> Fernet:
+    hash_bytes = hashlib.sha256(password.encode()).digest()
+    key = base64.urlsafe_b64encode(hash_bytes)
+    return Fernet(key)
 
-Do you want me to add that?
+fernet = get_fernet(ST_TOKEN)
+
+# Load YAML and decrypt password fields
+def load_devices(file_path: str):
+    with open(file_path, "r") as f:
+        data = yaml.safe_load(f)
+    
+    for device in data.get("devices", []):
+        if "password" in device:
+            device["password"] = fernet.decrypt(device["password"].encode()).decode()
+    
+    return data["devices"]
+
+# Example usage
+if __name__ == "__main__":
+    devices = load_devices("data_encrypted.yaml")
+    for d in devices:
+        print(f"Type: {d.get('type')}, IP: {d.get('ip')}, User: {d.get('user')}, Password: {d.get('password')}")
+```
+
+
+
+
