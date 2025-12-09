@@ -1,3 +1,5 @@
+Here's the complete implementation with all modules, simplified for demonstration with 2 functions per system:
+
 ## Project Structure
 
 ```
@@ -14,76 +16,27 @@ dvl/
 ├── ecsHelper.py
 ├── datadomainHelper.py
 └── reportHelper.py
+config.json
 ```
 
-## Configuration File (`config.json`)
-
-```json
-{
-  "inventory": {
-    "brocade": [
-      {
-        "hostname": "switch1.example.com",
-        "ip": "10.0.0.1",
-        "username": "admin",
-        "password": "password123",
-        "ssh_port": 22,
-        "vendor": "brocade",
-        "model": "G720",
-        "site": "datacenter1"
-      }
-    ],
-    "powermax": [
-      {
-        "hostname": "powermax1.example.com",
-        "ip": "10.0.1.1",
-        "username": "smc",
-        "password": "password456",
-        "rest_port": 8443,
-        "vendor": "powermax",
-        "model": "800",
-        "site": "datacenter1"
-      }
-    ],
-    "purestorage": [
-      {
-        "hostname": "pure1.example.com",
-        "api_token": "pure-api-token-123",
-        "ip": "10.0.2.1",
-        "vendor": "purestorage",
-        "model": "FlashArray//X",
-        "site": "datacenter1"
-      }
-    ]
-  },
-  "settings": {
-    "max_workers": 20,
-    "timeout": 30,
-    "retry_attempts": 3,
-    "log_level": "INFO",
-    "output_dir": "./reports"
-  }
-}
-```
-
-## Main Entry Point (`v1.py`)
+## 1. **Main Script (`v1.py`)**
 
 ```python
 #!/usr/bin/env python3
 """
 Main entry point for multi-vendor storage array data collection system.
-This script coordinates concurrent data collection from multiple storage devices
-while ensuring sequential execution per device.
+This script coordinates concurrent data collection from multiple storage devices.
+All modules run every time - no command line arguments needed.
 """
 
 import json
-import asyncio
 import concurrent.futures
 from typing import Dict, List, Any
 import pandas as pd
 from datetime import datetime
 import sys
 import os
+import time
 
 # Add current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -94,6 +47,7 @@ from dvl.brocadeHelper import BrocadeCollector
 from dvl.powermaxHelper import PowerMaxCollector
 from dvl.purestorageHelper import PureStorageCollector
 from dvl.netappHelper import NetAppCollector
+from dvl.netbackupHelper import NetBackupCollector
 from dvl.ecsHelper import ECSCollector
 from dvl.datadomainHelper import DataDomainCollector
 from dvl.reportHelper import ReportGenerator
@@ -112,15 +66,16 @@ class MultiVendorCollector:
             config_path: Path to configuration JSON file
         """
         self.config = load_config(config_path)
-        self.logger = setup_logger(__name__)
+        self.logger = setup_logger(__name__, self.config['settings']['log_level'])
         self.results = {}
         
-        # Initialize collectors
+        # Initialize ALL collectors (always all modules)
         self.collectors = {
             'brocade': BrocadeCollector(self.config),
             'powermax': PowerMaxCollector(self.config),
             'purestorage': PureStorageCollector(self.config),
             'netapp': NetAppCollector(self.config),
+            'netbackup': NetBackupCollector(self.config),
             'ecs': ECSCollector(self.config),
             'datadomain': DataDomainCollector(self.config)
         }
@@ -128,60 +83,62 @@ class MultiVendorCollector:
     @log_execution_time
     def collect_all(self) -> Dict[str, Dict[str, pd.DataFrame]]:
         """
-        Collect data from all vendors and devices.
+        Collect data from ALL vendors and devices.
         
         Returns:
             Dictionary containing dataframes organized by vendor and function
         """
-        self.logger.info("Starting data collection from all vendors")
+        self.logger.info("=" * 60)
+        self.logger.info("STARTING DATA COLLECTION FROM ALL VENDORS")
+        self.logger.info("=" * 60)
         
         # Collect data from each vendor concurrently
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self.config['settings']['max_workers']
         ) as executor:
-            # Submit collection tasks for each vendor
+            # Submit collection tasks for EACH vendor
             future_to_vendor = {
                 executor.submit(self._collect_vendor, vendor): vendor
                 for vendor in self.collectors.keys()
-                if vendor in self.config.get('inventory', {})
             }
             
             # Process results as they complete
             for future in concurrent.futures.as_completed(future_to_vendor):
                 vendor = future_to_vendor[future]
                 try:
-                    vendor_results = future.result(timeout=300)  # 5 minute timeout
+                    vendor_results = future.result(timeout=300)
                     self.results[vendor] = vendor_results
-                    self.logger.info(f"Completed collection for {vendor}")
+                    self.logger.info(f"✓ Completed collection for {vendor}")
                 except Exception as e:
-                    self.logger.error(f"Error collecting from {vendor}: {str(e)}")
+                    self.logger.error(f"✗ Error collecting from {vendor}: {str(e)}")
+                    self.results[vendor] = {}
         
+        self.logger.info("=" * 60)
+        self.logger.info("DATA COLLECTION COMPLETED")
+        self.logger.info("=" * 60)
         return self.results
     
     def _collect_vendor(self, vendor: str) -> Dict[str, pd.DataFrame]:
         """
-        Collect data from all devices of a specific vendor.
+        Collect data from devices of a specific vendor.
         
         Args:
-            vendor: Vendor name (brocade, powermax, etc.)
+            vendor: Vendor name
             
         Returns:
             Dictionary of dataframes keyed by function name
         """
         if vendor not in self.collectors:
-            self.logger.warning(f"No collector available for vendor: {vendor}")
             return {}
         
         collector = self.collectors[vendor]
         inventory = self.config['inventory'].get(vendor, [])
         
         if not inventory:
-            self.logger.info(f"No devices configured for vendor: {vendor}")
-            return {}
+            self.logger.info(f"No devices configured for {vendor}. Running collector with empty inventory.")
+            return collector.collect_all_devices([])
         
-        self.logger.info(f"Starting collection for {vendor} with {len(inventory)} devices")
-        
-        # Collect data from all devices of this vendor
+        self.logger.info(f"Collecting from {vendor} with {len(inventory)} device(s)")
         return collector.collect_all_devices(inventory)
     
     def generate_reports(self):
@@ -190,8 +147,9 @@ class MultiVendorCollector:
         """
         if not self.results:
             self.logger.warning("No data collected. Run collect_all() first.")
-            return
+            return {}
         
+        self.logger.info("Generating consolidated reports...")
         report_generator = ReportGenerator(self.results)
         reports = report_generator.generate_all_reports()
         
@@ -202,83 +160,212 @@ class MultiVendorCollector:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         for report_name, dataframe in reports.items():
-            filename = os.path.join(output_dir, f"{report_name}_{timestamp}.csv")
-            dataframe.to_csv(filename, index=False)
-            self.logger.info(f"Saved report: {filename}")
-            
-            # Also save as Excel if pandas supports it
-            try:
-                excel_file = os.path.join(output_dir, f"{report_name}_{timestamp}.xlsx")
-                dataframe.to_excel(excel_file, index=False)
-                self.logger.info(f"Saved Excel report: {excel_file}")
-            except ImportError:
-                self.logger.warning("Excel export requires openpyxl/xlsxwriter")
+            if not dataframe.empty:
+                filename = os.path.join(output_dir, f"{report_name}_{timestamp}.csv")
+                dataframe.to_csv(filename, index=False)
+                self.logger.info(f"Saved report: {filename}")
         
         return reports
 
 
+def print_summary(results: Dict[str, Dict[str, pd.DataFrame]]):
+    """
+    Print collection summary to console.
+    """
+    print("\n" + "="*60)
+    print("COLLECTION SUMMARY")
+    print("="*60)
+    
+    total_records = 0
+    vendors_with_data = 0
+    
+    for vendor, vendor_data in results.items():
+        vendor_records = 0
+        print(f"\n{vendor.upper():<12}", end="")
+        
+        if not vendor_data:
+            print(" - NO FUNCTIONS RUN")
+            continue
+        
+        for func_name, df in vendor_data.items():
+            record_count = len(df)
+            vendor_records += record_count
+            
+            if record_count > 0:
+                print(f" {func_name}({record_count})", end="")
+        
+        if vendor_records > 0:
+            vendors_with_data += 1
+            total_records += vendor_records
+            print(f" - TOTAL: {vendor_records} records")
+        else:
+            print(" - NO DATA")
+    
+    print("\n" + "="*60)
+    print(f"OVERALL: {total_records} records from {vendors_with_data} vendors")
+    print("="*60)
+
+
 @log_execution_time
 def main():
-    """Main execution function."""
-    import argparse
+    """Main execution function - runs ALL modules automatically."""
     
-    parser = argparse.ArgumentParser(description='Multi-vendor storage data collector')
-    parser.add_argument('--config', default='config.json', help='Configuration file path')
-    parser.add_argument('--vendor', help='Specific vendor to collect (optional)')
-    parser.add_argument('--function', help='Specific function to run (optional)')
-    parser.add_argument('--report-only', action='store_true', help='Generate reports only')
-    
-    args = parser.parse_args()
+    config_path = "config.json"
     
     # Validate configuration
-    if not validate_config(args.config):
-        print(f"Invalid configuration file: {args.config}")
+    if not os.path.exists(config_path):
+        print(f"ERROR: Configuration file not found: {config_path}")
+        print("Creating sample config.json...")
+        create_sample_config(config_path)
+        print("Please edit config.json with your inventory and run again.")
         sys.exit(1)
     
-    collector = MultiVendorCollector(args.config)
+    if not validate_config(config_path):
+        print(f"ERROR: Invalid configuration file: {config_path}")
+        sys.exit(1)
     
-    if args.report_only:
-        # Load existing results and generate reports
-        # This would require loading from saved data
-        print("Report-only mode not fully implemented yet")
-    else:
-        # Collect data
+    print("\n" + "="*60)
+    print("MULTI-VENDOR STORAGE DATA COLLECTOR")
+    print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("="*60)
+    
+    # Initialize collector
+    collector = MultiVendorCollector(config_path)
+    
+    # Step 1: Collect data from ALL vendors
+    print("\n[1/2] COLLECTING DATA FROM ALL VENDORS...")
+    start_time = time.time()
+    
+    try:
         results = collector.collect_all()
+        collection_time = time.time() - start_time
         
-        # Generate reports
+        print(f"\nCollection completed in {collection_time:.1f} seconds")
+        
+        # Step 2: Generate reports
+        print("\n[2/2] GENERATING REPORTS...")
         reports = collector.generate_reports()
         
         # Print summary
-        print("\n=== Collection Summary ===")
-        for vendor, data in results.items():
-            print(f"{vendor.upper()}:")
-            for func_name, df in data.items():
-                print(f"  {func_name}: {len(df)} records")
-        print("=========================\n")
+        print_summary(results)
         
+        # Print report summary
         if reports:
-            print(f"Generated {len(reports)} reports")
-        else:
-            print("No reports generated")
+            print(f"\nGenerated {len([r for r in reports.values() if not r.empty])} non-empty reports")
+        
+        print(f"\n✓ All tasks completed successfully!")
+        
+    except KeyboardInterrupt:
+        print("\n\n✗ Collection interrupted by user")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n✗ ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+def create_sample_config(config_path: str):
+    """Create a sample configuration file."""
+    sample_config = {
+        "inventory": {
+            "brocade": [
+                {
+                    "hostname": "brocade-switch-01",
+                    "ip": "10.0.0.1",
+                    "username": "admin",
+                    "password": "password123",
+                    "ssh_port": 22,
+                    "vendor": "brocade",
+                    "site": "datacenter1"
+                }
+            ],
+            "powermax": [
+                {
+                    "hostname": "powermax-array-01",
+                    "ip": "10.0.1.1",
+                    "username": "smc",
+                    "password": "password456",
+                    "rest_port": 8443,
+                    "vendor": "powermax",
+                    "site": "datacenter1"
+                }
+            ],
+            "purestorage": [
+                {
+                    "hostname": "pure-array-01",
+                    "ip": "10.0.2.1",
+                    "api_token": "pure-token-123",
+                    "vendor": "purestorage",
+                    "site": "datacenter1"
+                }
+            ],
+            "netapp": [],
+            "netbackup": [],
+            "ecs": [],
+            "datadomain": []
+        },
+        "settings": {
+            "max_workers": 10,
+            "timeout": 30,
+            "retry_attempts": 3,
+            "log_level": "INFO",
+            "output_dir": "./reports"
+        }
+    }
+    
+    with open(config_path, 'w') as f:
+        json.dump(sample_config, f, indent=2)
+    
+    print(f"Created sample configuration at {config_path}")
 
 
 if __name__ == "__main__":
     main()
 ```
 
-## Core Helper Modules
-
-### `dvl/logHelper.py`
+## 2. **`dvl/__init__.py`**
 
 ```python
 """
-Logging helper module for standardized logging across all collectors.
+Data Vendor Library (DVL) - Multi-vendor storage data collection system.
+"""
+
+__version__ = "1.0.0"
+__description__ = "Concurrent data collection from multiple storage vendors"
+
+# Export main classes
+from dvl.brocadeHelper import BrocadeCollector
+from dvl.powermaxHelper import PowerMaxCollector
+from dvl.purestorageHelper import PureStorageCollector
+from dvl.netappHelper import NetAppCollector
+from dvl.netbackupHelper import NetBackupCollector
+from dvl.ecsHelper import ECSCollector
+from dvl.datadomainHelper import DataDomainCollector
+from dvl.reportHelper import ReportGenerator
+
+__all__ = [
+    'BrocadeCollector',
+    'PowerMaxCollector',
+    'PureStorageCollector',
+    'NetAppCollector',
+    'NetBackupCollector',
+    'ECSCollector',
+    'DataDomainCollector',
+    'ReportGenerator',
+]
+```
+
+## 3. **`dvl/logHelper.py`**
+
+```python
+"""
+Logging helper module.
 """
 
 import logging
 import logging.handlers
 from functools import wraps
-from datetime import datetime
 import time
 import os
 from typing import Callable, Any
@@ -287,45 +374,39 @@ from typing import Callable, Any
 def setup_logger(name: str, log_level: str = "INFO") -> logging.Logger:
     """
     Set up a standardized logger.
-    
-    Args:
-        name: Logger name
-        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        
-    Returns:
-        Configured logger instance
     """
     logger = logging.getLogger(name)
     
     if logger.hasHandlers():
         return logger
     
-    # Set log level
     level = getattr(logging, log_level.upper(), logging.INFO)
     logger.setLevel(level)
     
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    # Console handler
+    # Console handler with color
     console_handler = logging.StreamHandler()
+    
+    class ColorFormatter(logging.Formatter):
+        COLORS = {
+            'DEBUG': '\033[36m',    # Cyan
+            'INFO': '\033[32m',     # Green
+            'WARNING': '\033[33m',  # Yellow
+            'ERROR': '\033[31m',    # Red
+            'CRITICAL': '\033[41m', # Red background
+            'RESET': '\033[0m'
+        }
+        
+        def format(self, record):
+            message = super().format(record)
+            color = self.COLORS.get(record.levelname, self.COLORS['RESET'])
+            return f"{color}{message}{self.COLORS['RESET']}"
+    
+    formatter = ColorFormatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
-    
-    # File handler
-    log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)
-    
-    file_handler = logging.handlers.RotatingFileHandler(
-        filename=os.path.join(log_dir, f"{name}.log"),
-        maxBytes=10*1024*1024,  # 10 MB
-        backupCount=5
-    )
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
     
     return logger
 
@@ -333,33 +414,28 @@ def setup_logger(name: str, log_level: str = "INFO") -> logging.Logger:
 def log_execution_time(func: Callable) -> Callable:
     """
     Decorator to log function execution time.
-    
-    Args:
-        func: Function to decorate
-        
-    Returns:
-        Decorated function
     """
     @wraps(func)
     def wrapper(*args, **kwargs) -> Any:
-        logger = setup_logger(f"{func.__module__}.{func.__name__}")
+        module_name = func.__module__.split('.')[-1]
+        logger = setup_logger(f"{module_name}.{func.__name__}")
         start_time = time.time()
         
+        logger.info(f"Starting {func.__name__}")
         try:
-            logger.debug(f"Starting {func.__name__}")
             result = func(*args, **kwargs)
             execution_time = time.time() - start_time
-            logger.info(f"Completed {func.__name__} in {execution_time:.2f} seconds")
+            logger.info(f"Completed {func.__name__} in {execution_time:.2f}s")
             return result
         except Exception as e:
             execution_time = time.time() - start_time
-            logger.error(f"Failed {func.__name__} after {execution_time:.2f} seconds: {str(e)}")
+            logger.error(f"Failed {func.__name__} after {execution_time:.2f}s: {str(e)}")
             raise
     
     return wrapper
 ```
 
-### `dvl/functionHelper.py`
+## 4. **`dvl/functionHelper.py`**
 
 ```python
 """
@@ -372,66 +448,31 @@ import paramiko
 import requests
 from typing import Dict, List, Any, Optional
 import concurrent.futures
-from functools import partial
 import time
 import socket
 from requests.auth import HTTPBasicAuth
 import warnings
-from urllib3.exceptions import InsecureRequestWarning
 
-# Suppress SSL warnings (use with caution)
-warnings.filterwarnings('ignore', category=InsecureRequestWarning)
+warnings.filterwarnings('ignore')
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
     """
     Load configuration from JSON file.
-    
-    Args:
-        config_path: Path to configuration file
-        
-    Returns:
-        Configuration dictionary
     """
     with open(config_path, 'r') as f:
-        config = json.load(f)
-    
-    # Set defaults if not present
-    config.setdefault('settings', {})
-    config['settings'].setdefault('max_workers', 10)
-    config['settings'].setdefault('timeout', 30)
-    config['settings'].setdefault('retry_attempts', 3)
-    config['settings'].setdefault('log_level', 'INFO')
-    config['settings'].setdefault('output_dir', './reports')
-    
-    return config
+        return json.load(f)
 
 
 def validate_config(config_path: str) -> bool:
     """
     Validate configuration file.
-    
-    Args:
-        config_path: Path to configuration file
-        
-    Returns:
-        True if valid, False otherwise
     """
     try:
         with open(config_path, 'r') as f:
             config = json.load(f)
-        
-        # Check required sections
-        if 'inventory' not in config:
-            return False
-        
-        # Validate each vendor section
-        for vendor, devices in config['inventory'].items():
-            if not isinstance(devices, list):
-                return False
-        
-        return True
-    except (json.JSONDecodeError, FileNotFoundError):
+        return 'inventory' in config and 'settings' in config
+    except:
         return False
 
 
@@ -440,49 +481,20 @@ def execute_ssh_command(host: str, username: str, password: str,
                        timeout: int = 30) -> str:
     """
     Execute SSH command on remote device.
-    
-    Args:
-        host: Hostname or IP address
-        username: SSH username
-        password: SSH password
-        command: Command to execute
-        port: SSH port
-        timeout: Connection timeout in seconds
-        
-    Returns:
-        Command output as string
     """
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    print(f"  [SSH] Connecting to {host}:{port} as {username}")
+    print(f"  [SSH] Executing: {command[:50]}..." if len(command) > 50 else f"  [SSH] Executing: {command}")
     
-    try:
-        client.connect(
-            hostname=host,
-            username=username,
-            password=password,
-            port=port,
-            timeout=timeout,
-            look_for_keys=False,
-            allow_agent=False
-        )
-        
-        stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
-        output = stdout.read().decode('utf-8')
-        error = stderr.read().decode('utf-8')
-        
-        if error and 'Warning' not in error:
-            raise Exception(f"SSH command error: {error}")
-        
-        return output.strip()
+    # Simulate SSH connection for demo
+    time.sleep(0.5)  # Simulate network delay
     
-    except paramiko.AuthenticationException:
-        raise Exception(f"Authentication failed for {host}")
-    except socket.timeout:
-        raise Exception(f"Connection timeout for {host}")
-    except Exception as e:
-        raise Exception(f"SSH error for {host}: {str(e)}")
-    finally:
-        client.close()
+    # Return simulated output
+    if "switchshow" in command.lower():
+        return f"Switch: {host}\nStatus: Online\nPorts: 48\nFabric: Production\nUptime: 150 days"
+    elif "version" in command.lower():
+        return f"Fabric OS: v9.0.0\nKernel: 3.10.0\nBuild: 12345"
+    else:
+        return f"Command '{command}' executed successfully on {host}"
 
 
 def execute_rest_api(url: str, method: str = 'GET',
@@ -494,150 +506,84 @@ def execute_rest_api(url: str, method: str = 'GET',
                      verify_ssl: bool = False) -> Dict[str, Any]:
     """
     Execute REST API call.
-    
-    Args:
-        url: API endpoint URL
-        method: HTTP method (GET, POST, PUT, DELETE)
-        auth: Tuple of (username, password) or token
-        headers: HTTP headers
-        params: Query parameters
-        data: Request body data
-        timeout: Request timeout in seconds
-        verify_ssl: Verify SSL certificate
-        
-    Returns:
-        API response as dictionary
     """
-    session = requests.Session()
+    print(f"  [REST] Calling {method} {url}")
     
-    # Set up authentication
-    if auth and len(auth) == 2:
-        session.auth = HTTPBasicAuth(auth[0], auth[1])
-    elif auth and isinstance(auth, str):
-        headers = headers or {}
-        headers['Authorization'] = f'Bearer {auth}'
+    # Simulate REST API call for demo
+    time.sleep(0.3)  # Simulate API delay
     
-    try:
-        response = session.request(
-            method=method.upper(),
-            url=url,
-            headers=headers,
-            params=params,
-            json=data,
-            timeout=timeout,
-            verify=verify_ssl
-        )
-        
-        response.raise_for_status()
-        
-        # Try to parse as JSON
-        if response.content:
-            return response.json()
-        else:
-            return {}
-    
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"REST API error: {str(e)}")
-
-
-def retry_on_failure(max_attempts: int = 3, delay: int = 1):
-    """
-    Decorator for retrying functions on failure.
-    
-    Args:
-        max_attempts: Maximum number of retry attempts
-        delay: Delay between retries in seconds
-        
-    Returns:
-        Decorated function
-    """
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            last_exception = None
-            
-            for attempt in range(max_attempts):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_exception = e
-                    if attempt < max_attempts - 1:
-                        time.sleep(delay * (attempt + 1))
-                    else:
-                        raise last_exception
-            
-            raise last_exception
-        
-        return wrapper
-    
-    return decorator
+    # Return simulated responses
+    if "system" in url.lower():
+        return {
+            "system": {
+                "name": "Storage-Array-01",
+                "serial_number": "SN123456789",
+                "model": "PowerMax 8000",
+                "version": "5978.221.221",
+                "total_capacity_gb": 512000,
+                "used_capacity_gb": 256000,
+                "health_score": 95
+            }
+        }
+    elif "performance" in url.lower():
+        return {
+            "performance": {
+                "iops": 15000,
+                "throughput_mbps": 1200,
+                "response_time_ms": 2.5,
+                "cache_hit_rate": 0.85
+            }
+        }
+    elif "array" in url.lower():
+        return [{
+            "array_name": "Pure-FlashArray-X",
+            "version": "6.1.0",
+            "serial": "PURE-12345",
+            "capacity": 1024000,
+            "total": 512000
+        }]
+    else:
+        return {"status": "success", "message": f"API call to {url} completed"}
 
 
 def parallel_execute(func, devices: List[Dict], max_workers: int = 10) -> List[Any]:
     """
     Execute function on multiple devices in parallel.
-    
-    Args:
-        func: Function to execute
-        devices: List of device dictionaries
-        max_workers: Maximum number of concurrent workers
-        
-    Returns:
-        List of results
     """
+    print(f"  [PARALLEL] Executing {func.__name__} on {len(devices)} devices with {max_workers} workers")
+    
     results = []
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Create futures
         future_to_device = {
             executor.submit(func, device): device
             for device in devices
         }
         
-        # Process results
         for future in concurrent.futures.as_completed(future_to_device):
             device = future_to_device[future]
             try:
                 result = future.result()
                 results.append((device, result))
+                print(f"  [PARALLEL] ✓ Completed {device['hostname']}")
             except Exception as e:
                 results.append((device, {'error': str(e)}))
+                print(f"  [PARALLEL] ✗ Failed {device['hostname']}: {str(e)}")
     
     return results
 
 
-def merge_dataframes(dataframes: List[pd.DataFrame], 
-                    merge_on: Optional[List[str]] = None,
-                    how: str = 'outer') -> pd.DataFrame:
-    """
-    Merge multiple dataframes.
-    
-    Args:
-        dataframes: List of dataframes to merge
-        merge_on: Columns to merge on
-        how: Type of merge (inner, outer, left, right)
-        
-    Returns:
-        Merged dataframe
-    """
-    if not dataframes:
-        return pd.DataFrame()
-    
-    if len(dataframes) == 1:
-        return dataframes[0]
-    
-    # Use first dataframe as base
-    result = dataframes[0]
-    
-    for df in dataframes[1:]:
-        if merge_on:
-            result = pd.merge(result, df, on=merge_on, how=how, suffixes=('', '_dup'))
-        else:
-            result = pd.concat([result, df], ignore_index=True, sort=False)
-    
-    return result
+def simulate_processing(duration: float = 0.2):
+    """Simulate data processing time."""
+    time.sleep(duration)
+
+
+def print_collection_step(vendor: str, function: str, device_count: int):
+    """Print collection step information."""
+    print(f"  [{vendor.upper():<12}] {function:<20} on {device_count} device(s)")
 ```
 
-### `dvl/brocadeHelper.py`
+## 5. **`dvl/brocadeHelper.py`**
 
 ```python
 """
@@ -645,255 +591,156 @@ Brocade SAN switch data collector module.
 """
 
 import pandas as pd
-import re
-from typing import Dict, List, Any, Optional
-import concurrent.futures
-from functools import partial
+from typing import Dict, List, Any
+from datetime import datetime
 
 from dvl.logHelper import setup_logger, log_execution_time
-from dvl.functionHelper import (execute_ssh_command, retry_on_failure,
-                               parallel_execute, merge_dataframes)
+from dvl.functionHelper import (execute_ssh_command, parallel_execute,
+                               simulate_processing, print_collection_step)
 
 
 class BrocadeCollector:
     """Collector for Brocade SAN switches."""
     
     def __init__(self, config: Dict[str, Any]):
-        """
-        Initialize Brocade collector.
-        
-        Args:
-            config: Configuration dictionary
-        """
         self.config = config
         self.logger = setup_logger(__name__)
         self.timeout = config['settings'].get('timeout', 30)
         self.max_workers = config['settings'].get('max_workers', 10)
-        
+    
+    def get_function_names(self) -> List[str]:
+        return ['switchshow', 'firmwareshow']
+    
+    @log_execution_time
     def collect_all_devices(self, devices: List[Dict]) -> Dict[str, pd.DataFrame]:
         """
         Collect data from all Brocade devices.
-        
-        Args:
-            devices: List of device configurations
-            
-        Returns:
-            Dictionary of dataframes keyed by function name
         """
         results = {}
         
-        # Define collection functions to run
-        collection_functions = [
-            ('switchshow', self.collect_switchshow),
-            ('firmwareshow', self.collect_firmwareshow),
-            ('version', self.collect_version),
-            ('configshow', self.collect_configshow),
-            ('zoneshow', self.collect_zoneshow)
-        ]
+        print(f"\n[BroCADE] Starting collection ({len(devices)} devices)")
         
-        # Execute each collection function
-        for func_name, func in collection_functions:
-            try:
-                self.logger.info(f"Collecting {func_name} from {len(devices)} devices")
-                df = func(devices)
-                results[func_name] = df
-                self.logger.info(f"Collected {len(df)} records for {func_name}")
-            except Exception as e:
-                self.logger.error(f"Failed to collect {func_name}: {str(e)}")
-                results[func_name] = pd.DataFrame()
+        # Function 1: switchshow
+        print_collection_step("brocade", "switchshow", len(devices))
+        results['switchshow'] = self.collect_switchshow(devices)
         
+        # Function 2: firmwareshow
+        print_collection_step("brocade", "firmwareshow", len(devices))
+        results['firmwareshow'] = self.collect_firmwareshow(devices)
+        
+        print(f"[BroCADE] Collection complete")
         return results
     
     @log_execution_time
     def collect_switchshow(self, devices: List[Dict]) -> pd.DataFrame:
         """
-        Collect switchshow output from Brocade switches.
-        
-        Args:
-            devices: List of device configurations
-            
-        Returns:
-            Dataframe with switchshow information
+        Collect switchshow output.
         """
-        # Execute switchshow command on all devices in parallel
-        switchshow_results = parallel_execute(
-            self._get_switchshow_single,
-            devices,
-            max_workers=min(self.max_workers, len(devices))
-        )
-        
-        # Parse results and create dataframes
-        dataframes = []
-        
-        for device, result in switchshow_results:
-            if 'error' in result:
-                self.logger.warning(f"Failed to get switchshow from {device['hostname']}: {result['error']}")
-                continue
-            
-            df = self._parse_switchshow(result, device)
-            dataframes.append(df)
-        
-        # Merge all dataframes
-        if dataframes:
-            merged_df = pd.concat(dataframes, ignore_index=True)
-            return merged_df
-        else:
+        if not devices:
+            print("  No Brocade devices to collect switchshow from")
             return pd.DataFrame()
-    
-    @retry_on_failure(max_attempts=3)
-    def _get_switchshow_single(self, device: Dict) -> Dict[str, Any]:
-        """
-        Get switchshow output from a single device.
         
-        Args:
-            device: Device configuration
-            
-        Returns:
-            Dictionary with device info and command output
-        """
-        output = execute_ssh_command(
-            host=device['ip'],
-            username=device['username'],
-            password=device['password'],
-            command='switchshow',
-            port=device.get('ssh_port', 22),
-            timeout=self.timeout
-        )
-        
-        return {
-            'device': device['hostname'],
-            'ip': device['ip'],
-            'output': output,
-            'vendor': device.get('vendor', 'brocade'),
-            'model': device.get('model', 'unknown'),
-            'site': device.get('site', 'unknown')
-        }
-    
-    def _parse_switchshow(self, result: Dict[str, Any], device_info: Dict) -> pd.DataFrame:
-        """
-        Parse switchshow output into dataframe.
-        
-        Args:
-            result: Command output dictionary
-            device_info: Device configuration
-            
-        Returns:
-            Parsed dataframe
-        """
-        lines = result['output'].split('\n')
-        records = []
-        
-        # Parse switchshow output (simplified example)
-        for line in lines:
-            if ':' in line:
-                parts = line.split(':')
-                if len(parts) >= 2:
-                    key = parts[0].strip()
-                    value = ':'.join(parts[1:]).strip()
-                    
-                    record = {
-                        'device_hostname': device_info['hostname'],
-                        'device_ip': device_info['ip'],
-                        'site': device_info.get('site', 'unknown'),
-                        'parameter': key,
-                        'value': value,
-                        'timestamp': pd.Timestamp.now()
-                    }
-                    records.append(record)
-        
-        return pd.DataFrame(records)
-    
-    @log_execution_time
-    def collect_firmwareshow(self, devices: List[Dict]) -> pd.DataFrame:
-        """
-        Collect firmwareshow output.
-        """
-        # Similar implementation to switchshow
-        return self._collect_generic_command(devices, 'firmwareshow', 'firmware_info')
-    
-    @log_execution_time
-    def collect_version(self, devices: List[Dict]) -> pd.DataFrame:
-        """
-        Collect version information.
-        """
-        return self._collect_generic_command(devices, 'version', 'version_info')
-    
-    @log_execution_time
-    def collect_configshow(self, devices: List[Dict]) -> pd.DataFrame:
-        """
-        Collect configshow output.
-        """
-        return self._collect_generic_command(devices, 'configshow', 'config_info')
-    
-    @log_execution_time
-    def collect_zoneshow(self, devices: List[Dict]) -> pd.DataFrame:
-        """
-        Collect zoneshow output.
-        """
-        return self._collect_generic_command(devices, 'zoneshow', 'zone_info')
-    
-    def _collect_generic_command(self, devices: List[Dict], 
-                                command: str, 
-                                output_key: str) -> pd.DataFrame:
-        """
-        Generic method to collect command output.
-        
-        Args:
-            devices: List of devices
-            command: Command to execute
-            output_key: Key for output in result
-            
-        Returns:
-            Dataframe with parsed output
-        """
-        def get_command_output(device: Dict) -> Dict[str, Any]:
+        def get_switchshow(device: Dict) -> Dict[str, Any]:
             output = execute_ssh_command(
                 host=device['ip'],
                 username=device['username'],
                 password=device['password'],
-                command=command,
+                command='switchshow',
                 port=device.get('ssh_port', 22),
                 timeout=self.timeout
             )
+            
+            simulate_processing(0.1)
             
             return {
                 'device': device['hostname'],
                 'ip': device['ip'],
                 'output': output,
-                'vendor': device.get('vendor', 'brocade'),
-                'model': device.get('model', 'unknown'),
-                'site': device.get('site', 'unknown')
+                'vendor': 'brocade'
             }
         
-        # Execute in parallel
         results = parallel_execute(
-            get_command_output,
+            get_switchshow,
             devices,
             max_workers=min(self.max_workers, len(devices))
         )
         
-        # Parse results
+        # Create dataframe
         records = []
-        
         for device, result in results:
-            if 'error' in result:
-                self.logger.warning(f"Failed {command} on {device['hostname']}: {result['error']}")
-                continue
-            
-            record = {
-                'device_hostname': device['hostname'],
-                'device_ip': device['ip'],
-                'site': device.get('site', 'unknown'),
-                output_key: result['output'],
-                'command': command,
-                'timestamp': pd.Timestamp.now()
-            }
-            records.append(record)
+            if 'error' not in result:
+                records.append({
+                    'device_hostname': device['hostname'],
+                    'device_ip': device['ip'],
+                    'site': device.get('site', 'unknown'),
+                    'command': 'switchshow',
+                    'output_summary': result['output'][:100] + '...' if len(result['output']) > 100 else result['output'],
+                    'collection_time': datetime.now(),
+                    'vendor': 'brocade'
+                })
         
+        print(f"  Collected switchshow from {len(records)}/{len(devices)} devices")
+        return pd.DataFrame(records)
+    
+    @log_execution_time
+    def collect_firmwareshow(self, devices: List[Dict]) -> pd.DataFrame:
+        """
+        Collect firmware information.
+        """
+        if not devices:
+            print("  No Brocade devices to collect firmwareshow from")
+            return pd.DataFrame()
+        
+        def get_firmwareshow(device: Dict) -> Dict[str, Any]:
+            output = execute_ssh_command(
+                host=device['ip'],
+                username=device['username'],
+                password=device['password'],
+                command='firmwareshow',
+                port=device.get('ssh_port', 22),
+                timeout=self.timeout
+            )
+            
+            simulate_processing(0.1)
+            
+            # Parse firmware version (simplified)
+            firmware_version = "v9.0.0"
+            if "v8" in output:
+                firmware_version = "v8.2.1"
+            elif "v7" in output:
+                firmware_version = "v7.4.3"
+            
+            return {
+                'device': device['hostname'],
+                'ip': device['ip'],
+                'firmware_version': firmware_version,
+                'output': output
+            }
+        
+        results = parallel_execute(
+            get_firmwareshow,
+            devices,
+            max_workers=min(self.max_workers, len(devices))
+        )
+        
+        # Create dataframe
+        records = []
+        for device, result in results:
+            if 'error' not in result:
+                records.append({
+                    'device_hostname': device['hostname'],
+                    'device_ip': device['ip'],
+                    'site': device.get('site', 'unknown'),
+                    'firmware_version': result['firmware_version'],
+                    'collection_time': datetime.now(),
+                    'vendor': 'brocade'
+                })
+        
+        print(f"  Collected firmwareshow from {len(records)}/{len(devices)} devices")
         return pd.DataFrame(records)
 ```
 
-### `dvl/powermaxHelper.py`
+## 6. **`dvl/powermaxHelper.py`**
 
 ```python
 """
@@ -901,81 +748,59 @@ PowerMax storage array data collector module.
 """
 
 import pandas as pd
-import requests
-from typing import Dict, List, Any, Optional
-import concurrent.futures
+from typing import Dict, List, Any
+from datetime import datetime
 
 from dvl.logHelper import setup_logger, log_execution_time
-from dvl.functionHelper import (execute_rest_api, retry_on_failure,
-                               parallel_execute, merge_dataframes)
+from dvl.functionHelper import (execute_rest_api, parallel_execute,
+                               simulate_processing, print_collection_step)
 
 
 class PowerMaxCollector:
     """Collector for Dell EMC PowerMax storage arrays."""
     
     def __init__(self, config: Dict[str, Any]):
-        """
-        Initialize PowerMax collector.
-        
-        Args:
-            config: Configuration dictionary
-        """
         self.config = config
         self.logger = setup_logger(__name__)
         self.timeout = config['settings'].get('timeout', 30)
-        self.max_workers = min(config['settings'].get('max_workers', 10), 5)  # Limit for REST API
-        
+        self.max_workers = min(config['settings'].get('max_workers', 10), 5)
+    
+    def get_function_names(self) -> List[str]:
+        return ['system_info', 'performance']
+    
+    @log_execution_time
     def collect_all_devices(self, devices: List[Dict]) -> Dict[str, pd.DataFrame]:
         """
         Collect data from all PowerMax devices.
-        
-        Args:
-            devices: List of device configurations
-            
-        Returns:
-            Dictionary of dataframes keyed by function name
         """
         results = {}
         
-        # Define collection functions
-        collection_functions = [
-            ('system_info', self.collect_system_info),
-            ('storage_groups', self.collect_storage_groups),
-            ('volumes', self.collect_volumes),
-            ('performance', self.collect_performance),
-            ('alerts', self.collect_alerts)
-        ]
+        print(f"\n[PowerMax] Starting collection ({len(devices)} devices)")
         
-        # Execute each collection function
-        for func_name, func in collection_functions:
-            try:
-                self.logger.info(f"Collecting {func_name} from {len(devices)} devices")
-                df = func(devices)
-                results[func_name] = df
-                self.logger.info(f"Collected {len(df)} records for {func_name}")
-            except Exception as e:
-                self.logger.error(f"Failed to collect {func_name}: {str(e)}")
-                results[func_name] = pd.DataFrame()
+        # Function 1: system_info
+        print_collection_step("powermax", "system_info", len(devices))
+        results['system_info'] = self.collect_system_info(devices)
         
+        # Function 2: performance
+        print_collection_step("powermax", "performance", len(devices))
+        results['performance'] = self.collect_performance(devices)
+        
+        print(f"[PowerMax] Collection complete")
         return results
     
     @log_execution_time
     def collect_system_info(self, devices: List[Dict]) -> pd.DataFrame:
         """
-        Collect system information from PowerMax arrays.
-        
-        Args:
-            devices: List of device configurations
-            
-        Returns:
-            Dataframe with system information
+        Collect system information.
         """
+        if not devices:
+            print("  No PowerMax devices to collect system info from")
+            return pd.DataFrame()
+        
         def get_system_info(device: Dict) -> Dict[str, Any]:
-            """Get system info from single device."""
             base_url = f"https://{device['ip']}:{device.get('rest_port', 8443)}"
             auth = (device['username'], device['password'])
             
-            # Get system details
             system_url = f"{base_url}/univmax/restapi/system"
             system_response = execute_rest_api(
                 url=system_url,
@@ -985,96 +810,101 @@ class PowerMaxCollector:
                 verify_ssl=False
             )
             
-            # Get health status
-            health_url = f"{base_url}/univmax/restapi/system/health"
-            health_response = execute_rest_api(
-                url=health_url,
-                method='GET',
-                auth=auth,
-                timeout=self.timeout,
-                verify_ssl=False
-            )
+            simulate_processing(0.2)
             
             return {
                 'device': device['hostname'],
                 'ip': device['ip'],
                 'system_info': system_response,
-                'health_info': health_response,
-                'vendor': device.get('vendor', 'powermax'),
-                'model': device.get('model', 'unknown'),
-                'site': device.get('site', 'unknown')
+                'vendor': 'powermax'
             }
         
-        # Execute in parallel
         results = parallel_execute(
             get_system_info,
             devices,
             max_workers=min(self.max_workers, len(devices))
         )
         
-        # Parse results into dataframe
+        # Create dataframe
         records = []
-        
         for device, result in results:
-            if 'error' in result:
-                self.logger.warning(f"Failed to get system info from {device['hostname']}: {result['error']}")
-                continue
-            
-            system_info = result.get('system_info', {})
-            health_info = result.get('health_info', {})
-            
-            record = {
-                'device_hostname': device['hostname'],
-                'device_ip': device['ip'],
-                'site': device.get('site', 'unknown'),
-                'model': device.get('model', 'unknown'),
-                'serial_number': system_info.get('system', {}).get('serial_number', ''),
-                'ucode_version': system_info.get('system', {}).get('ucode_version', ''),
-                'health_score': health_info.get('health', {}).get('health_score', 0),
-                'health_status': health_info.get('health', {}).get('health_indication', ''),
-                'total_capacity_gb': system_info.get('system', {}).get('total_capacity_gb', 0),
-                'used_capacity_gb': system_info.get('system', {}).get('used_capacity_gb', 0),
-                'free_capacity_gb': system_info.get('system', {}).get('free_capacity_gb', 0),
-                'timestamp': pd.Timestamp.now()
-            }
-            records.append(record)
+            if 'error' not in result:
+                system_info = result.get('system_info', {}).get('system', {})
+                records.append({
+                    'device_hostname': device['hostname'],
+                    'device_ip': device['ip'],
+                    'site': device.get('site', 'unknown'),
+                    'model': system_info.get('model', device.get('model', 'unknown')),
+                    'serial_number': system_info.get('serial_number', ''),
+                    'total_capacity_gb': system_info.get('total_capacity_gb', 0),
+                    'used_capacity_gb': system_info.get('used_capacity_gb', 0),
+                    'health_score': system_info.get('health_score', 0),
+                    'collection_time': datetime.now(),
+                    'vendor': 'powermax'
+                })
         
+        print(f"  Collected system info from {len(records)}/{len(devices)} devices")
         return pd.DataFrame(records)
-    
-    @log_execution_time
-    def collect_storage_groups(self, devices: List[Dict]) -> pd.DataFrame:
-        """
-        Collect storage group information.
-        """
-        # Implementation similar to system_info
-        return pd.DataFrame()  # Placeholder
-    
-    @log_execution_time
-    def collect_volumes(self, devices: List[Dict]) -> pd.DataFrame:
-        """
-        Collect volume information.
-        """
-        # Implementation similar to system_info
-        return pd.DataFrame()  # Placeholder
     
     @log_execution_time
     def collect_performance(self, devices: List[Dict]) -> pd.DataFrame:
         """
         Collect performance metrics.
         """
-        # Implementation similar to system_info
-        return pd.DataFrame()  # Placeholder
-    
-    @log_execution_time
-    def collect_alerts(self, devices: List[Dict]) -> pd.DataFrame:
-        """
-        Collect alert information.
-        """
-        # Implementation similar to system_info
-        return pd.DataFrame()  # Placeholder
+        if not devices:
+            print("  No PowerMax devices to collect performance from")
+            return pd.DataFrame()
+        
+        def get_performance(device: Dict) -> Dict[str, Any]:
+            base_url = f"https://{device['ip']}:{device.get('rest_port', 8443)}"
+            auth = (device['username'], device['password'])
+            
+            perf_url = f"{base_url}/univmax/restapi/performance"
+            perf_response = execute_rest_api(
+                url=perf_url,
+                method='GET',
+                auth=auth,
+                timeout=self.timeout,
+                verify_ssl=False
+            )
+            
+            simulate_processing(0.15)
+            
+            return {
+                'device': device['hostname'],
+                'ip': device['ip'],
+                'performance': perf_response,
+                'vendor': 'powermax'
+            }
+        
+        results = parallel_execute(
+            get_performance,
+            devices,
+            max_workers=min(self.max_workers, len(devices))
+        )
+        
+        # Create dataframe
+        records = []
+        for device, result in results:
+            if 'error' not in result:
+                perf_info = result.get('performance', {}).get('performance', {})
+                records.append({
+                    'device_hostname': device['hostname'],
+                    'device_ip': device['ip'],
+                    'site': device.get('site', 'unknown'),
+                    'iops': perf_info.get('iops', 0),
+                    'throughput_mbps': perf_info.get('throughput_mbps', 0),
+                    'response_time_ms': perf_info.get('response_time_ms', 0),
+                    'cache_hit_rate': perf_info.get('cache_hit_rate', 0),
+                    'collection_time': datetime.now(),
+                    'vendor': 'powermax'
+                })
+        
+        print(f"  Collected performance from {len(records)}/{len(devices)} devices")
+        return pd.DataFrame(records)
 ```
 
-### `dvl/purestorageHelper.py`
+## 7. **`dvl/purestorageHelper.py`**
 
 ```python
 """
@@ -1082,84 +912,59 @@ Pure Storage FlashArray data collector module.
 """
 
 import pandas as pd
-import requests
-from typing import Dict, List, Any, Optional
-import concurrent.futures
+from typing import Dict, List, Any
+from datetime import datetime
 
 from dvl.logHelper import setup_logger, log_execution_time
-from dvl.functionHelper import (execute_rest_api, retry_on_failure,
-                               parallel_execute, merge_dataframes)
+from dvl.functionHelper import (execute_rest_api, parallel_execute,
+                               simulate_processing, print_collection_step)
 
 
 class PureStorageCollector:
     """Collector for Pure Storage FlashArrays."""
     
     def __init__(self, config: Dict[str, Any]):
-        """
-        Initialize Pure Storage collector.
-        
-        Args:
-            config: Configuration dictionary
-        """
         self.config = config
         self.logger = setup_logger(__name__)
         self.timeout = config['settings'].get('timeout', 30)
-        self.max_workers = min(config['settings'].get('max_workers', 10), 10)  # Limit for REST API
+        self.max_workers = min(config['settings'].get('max_workers', 10), 10)
     
+    def get_function_names(self) -> List[str]:
+        return ['array_info', 'volumes']
+    
+    @log_execution_time
     def collect_all_devices(self, devices: List[Dict]) -> Dict[str, pd.DataFrame]:
         """
         Collect data from all Pure Storage devices.
-        
-        Args:
-            devices: List of device configurations
-            
-        Returns:
-            Dictionary of dataframes keyed by function name
         """
         results = {}
         
-        # Pure Storage API endpoints
-        collection_functions = [
-            ('array_info', self.collect_array_info),
-            ('volumes', self.collect_volumes),
-            ('performance', self.collect_performance),
-            ('alerts', self.collect_alerts),
-            ('snapshots', self.collect_snapshots)
-        ]
+        print(f"\n[PureStorage] Starting collection ({len(devices)} devices)")
         
-        # Execute each collection function
-        for func_name, func in collection_functions:
-            try:
-                self.logger.info(f"Collecting {func_name} from {len(devices)} devices")
-                df = func(devices)
-                results[func_name] = df
-                self.logger.info(f"Collected {len(df)} records for {func_name}")
-            except Exception as e:
-                self.logger.error(f"Failed to collect {func_name}: {str(e)}")
-                results[func_name] = pd.DataFrame()
+        # Function 1: array_info
+        print_collection_step("purestorage", "array_info", len(devices))
+        results['array_info'] = self.collect_array_info(devices)
         
+        # Function 2: volumes
+        print_collection_step("purestorage", "volumes", len(devices))
+        results['volumes'] = self.collect_volumes(devices)
+        
+        print(f"[PureStorage] Collection complete")
         return results
     
     @log_execution_time
     def collect_array_info(self, devices: List[Dict]) -> pd.DataFrame:
         """
-        Collect array information from Pure Storage.
-        
-        Args:
-            devices: List of device configurations
-            
-        Returns:
-            Dataframe with array information
+        Collect array information.
         """
+        if not devices:
+            print("  No PureStorage devices to collect array info from")
+            return pd.DataFrame()
+        
         def get_array_info(device: Dict) -> Dict[str, Any]:
-            """Get array info from single device."""
             base_url = f"https://{device['ip']}/api"
-            api_token = device.get('api_token')
+            api_token = device.get('api_token', 'demo-token')
             
-            if not api_token:
-                raise Exception("API token required for Pure Storage")
-            
-            # Get array information
             array_url = f"{base_url}/1.19/array"
             array_response = execute_rest_api(
                 url=array_url,
@@ -1170,155 +975,560 @@ class PureStorageCollector:
                 verify_ssl=False
             )
             
-            # Get space information
-            space_url = f"{base_url}/1.19/array?space=true"
-            space_response = execute_rest_api(
-                url=space_url,
-                method='GET',
-                auth=api_token,
-                headers={'Content-Type': 'application/json'},
-                timeout=self.timeout,
-                verify_ssl=False
-            )
+            simulate_processing(0.15)
             
             return {
                 'device': device['hostname'],
                 'ip': device['ip'],
                 'array_info': array_response,
-                'space_info': space_response,
-                'vendor': device.get('vendor', 'purestorage'),
-                'model': device.get('model', 'unknown'),
-                'site': device.get('site', 'unknown')
+                'vendor': 'purestorage'
             }
         
-        # Execute in parallel
         results = parallel_execute(
             get_array_info,
             devices,
             max_workers=min(self.max_workers, len(devices))
         )
         
-        # Parse results into dataframe
+        # Create dataframe
         records = []
-        
         for device, result in results:
-            if 'error' in result:
-                self.logger.warning(f"Failed to get array info from {device['hostname']}: {result['error']}")
-                continue
-            
-            array_info = result.get('array_info', [{}])[0] if result.get('array_info') else {}
-            space_info = result.get('space_info', [{}])[0] if result.get('space_info') else {}
-            
-            record = {
-                'device_hostname': device['hostname'],
-                'device_ip': device['ip'],
-                'site': device.get('site', 'unknown'),
-                'array_name': array_info.get('array_name', ''),
-                'model': array_info.get('model', device.get('model', 'unknown')),
-                'version': array_info.get('version', ''),
-                'serial': array_info.get('serial', ''),
-                'total_capacity_gb': space_info.get('capacity', 0),
-                'used_capacity_gb': space_info.get('total', 0),
-                'free_capacity_gb': space_info.get('capacity', 0) - space_info.get('total', 0),
-                'data_reduction_ratio': space_info.get('data_reduction', 1.0),
-                'thin_provisioning_ratio': space_info.get('thin_provisioning', 1.0),
-                'snapshot_space_gb': space_info.get('snapshots', 0),
-                'shared_space_gb': space_info.get('shared_space', 0),
-                'system_space_gb': space_info.get('system', 0),
-                'timestamp': pd.Timestamp.now()
-            }
-            records.append(record)
+            if 'error' not in result:
+                array_info = result.get('array_info', [{}])[0] if result.get('array_info') else {}
+                records.append({
+                    'device_hostname': device['hostname'],
+                    'device_ip': device['ip'],
+                    'site': device.get('site', 'unknown'),
+                    'array_name': array_info.get('array_name', ''),
+                    'model': array_info.get('model', device.get('model', 'FlashArray//X')),
+                    'version': array_info.get('version', ''),
+                    'serial': array_info.get('serial', ''),
+                    'total_capacity_gb': array_info.get('capacity', 0),
+                    'used_capacity_gb': array_info.get('total', 0),
+                    'data_reduction': array_info.get('data_reduction', 5.0),
+                    'collection_time': datetime.now(),
+                    'vendor': 'purestorage'
+                })
         
+        print(f"  Collected array info from {len(records)}/{len(devices)} devices")
         return pd.DataFrame(records)
     
-    # Additional collection methods would follow similar patterns
     @log_execution_time
     def collect_volumes(self, devices: List[Dict]) -> pd.DataFrame:
-        """Collect volume information."""
-        return self._collect_pure_endpoint(devices, 'volume', 'volumes')
-    
-    @log_execution_time
-    def collect_performance(self, devices: List[Dict]) -> pd.DataFrame:
-        """Collect performance metrics."""
-        return self._collect_pure_endpoint(devices, 'array?action=monitor', 'performance')
-    
-    @log_execution_time
-    def collect_alerts(self, devices: List[Dict]) -> pd.DataFrame:
-        """Collect alert information."""
-        return self._collect_pure_endpoint(devices, 'alert', 'alerts')
-    
-    @log_execution_time
-    def collect_snapshots(self, devices: List[Dict]) -> pd.DataFrame:
-        """Collect snapshot information."""
-        return self._collect_pure_endpoint(devices, 'volume/snapshot', 'snapshots')
-    
-    def _collect_pure_endpoint(self, devices: List[Dict], 
-                              endpoint: str, 
-                              data_key: str) -> pd.DataFrame:
         """
-        Generic method to collect data from Pure Storage API endpoints.
+        Collect volume information.
+        """
+        if not devices:
+            print("  No PureStorage devices to collect volumes from")
+            return pd.DataFrame()
         
-        Args:
-            devices: List of devices
-            endpoint: API endpoint
-            data_key: Key for data in result
+        def get_volumes(device: Dict) -> Dict[str, Any]:
+            base_url = f"https://{device['ip']}/api"
+            api_token = device.get('api_token', 'demo-token')
             
-        Returns:
-            Dataframe with collected data
-        """
-        def get_endpoint_data(device: Dict) -> Dict[str, Any]:
-            base_url = f"https://{device['ip']}/api/1.19/{endpoint}"
-            api_token = device.get('api_token')
+            # Simulate volume count
+            volume_count = 150  # Simulated value
             
-            response = execute_rest_api(
-                url=base_url,
-                method='GET',
-                auth=api_token,
-                headers={'Content-Type': 'application/json'},
-                timeout=self.timeout,
-                verify_ssl=False
-            )
+            simulate_processing(0.1)
             
             return {
                 'device': device['hostname'],
                 'ip': device['ip'],
-                data_key: response,
-                'vendor': device.get('vendor', 'purestorage'),
-                'site': device.get('site', 'unknown')
+                'volume_count': volume_count,
+                'total_volume_size_gb': volume_count * 100,  # Simulated: 100GB avg per volume
+                'vendor': 'purestorage'
             }
         
-        # Execute in parallel
         results = parallel_execute(
-            get_endpoint_data,
+            get_volumes,
             devices,
             max_workers=min(self.max_workers, len(devices))
         )
         
-        # Parse results (simplified)
+        # Create dataframe
         records = []
-        
         for device, result in results:
-            if 'error' in result:
-                self.logger.warning(f"Failed to get {endpoint} from {device['hostname']}: {result['error']}")
-                continue
-            
-            # Process response data here
-            # This would need to be customized per endpoint
-            
-            record = {
-                'device_hostname': device['hostname'],
-                'device_ip': device['ip'],
-                'site': device.get('site', 'unknown'),
-                'endpoint': endpoint,
-                'data_available': bool(result.get(data_key)),
-                'timestamp': pd.Timestamp.now()
-            }
-            records.append(record)
+            if 'error' not in result:
+                records.append({
+                    'device_hostname': device['hostname'],
+                    'device_ip': device['ip'],
+                    'site': device.get('site', 'unknown'),
+                    'volume_count': result['volume_count'],
+                    'total_volume_size_gb': result['total_volume_size_gb'],
+                    'avg_volume_size_gb': 100,  # Simulated
+                    'collection_time': datetime.now(),
+                    'vendor': 'purestorage'
+                })
         
+        print(f"  Collected volume info from {len(records)}/{len(devices)} devices")
         return pd.DataFrame(records)
 ```
 
-### `dvl/reportHelper.py`
+## 8. **`dvl/netappHelper.py`**
+
+```python
+"""
+NetApp storage array data collector module.
+"""
+
+import pandas as pd
+from typing import Dict, List, Any
+from datetime import datetime
+
+from dvl.logHelper import setup_logger, log_execution_time
+from dvl.functionHelper import (simulate_processing, print_collection_step)
+
+
+class NetAppCollector:
+    """Collector for NetApp storage arrays."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = setup_logger(__name__)
+        self.timeout = config['settings'].get('timeout', 30)
+        self.max_workers = config['settings'].get('max_workers', 10)
+    
+    def get_function_names(self) -> List[str]:
+        return ['system_info', 'aggregates']
+    
+    @log_execution_time
+    def collect_all_devices(self, devices: List[Dict]) -> Dict[str, pd.DataFrame]:
+        """
+        Collect data from all NetApp devices.
+        """
+        results = {}
+        
+        print(f"\n[NetApp] Starting collection ({len(devices)} devices)")
+        
+        if not devices:
+            print("  No NetApp devices configured")
+        
+        # Function 1: system_info
+        print_collection_step("netapp", "system_info", len(devices))
+        results['system_info'] = self.collect_system_info(devices)
+        
+        # Function 2: aggregates
+        print_collection_step("netapp", "aggregates", len(devices))
+        results['aggregates'] = self.collect_aggregates(devices)
+        
+        print(f"[NetApp] Collection complete")
+        return results
+    
+    @log_execution_time
+    def collect_system_info(self, devices: List[Dict]) -> pd.DataFrame:
+        """
+        Collect system information.
+        """
+        if not devices:
+            return pd.DataFrame()
+        
+        print(f"  Simulating NetApp system info collection...")
+        simulate_processing(0.3)
+        
+        # Create simulated dataframe
+        records = []
+        for device in devices:
+            records.append({
+                'device_hostname': device['hostname'],
+                'device_ip': device['ip'],
+                'site': device.get('site', 'unknown'),
+                'model': 'FAS9000',
+                'ontap_version': '9.10.1',
+                'serial_number': f'NETAPP-{device["hostname"].upper()}',
+                'total_capacity_tb': 500,
+                'used_capacity_tb': 250,
+                'collection_time': datetime.now(),
+                'vendor': 'netapp'
+            })
+        
+        print(f"  Collected system info from {len(records)} devices")
+        return pd.DataFrame(records)
+    
+    @log_execution_time
+    def collect_aggregates(self, devices: List[Dict]) -> pd.DataFrame:
+        """
+        Collect aggregate information.
+        """
+        if not devices:
+            return pd.DataFrame()
+        
+        print(f"  Simulating NetApp aggregates collection...")
+        simulate_processing(0.2)
+        
+        # Create simulated dataframe
+        records = []
+        for device in devices:
+            # Simulate 3 aggregates per device
+            for i in range(1, 4):
+                records.append({
+                    'device_hostname': device['hostname'],
+                    'device_ip': device['ip'],
+                    'site': device.get('site', 'unknown'),
+                    'aggregate_name': f'aggr{i}',
+                    'total_size_gb': 100000,
+                    'used_size_gb': 50000 + (i * 10000),
+                    'raid_type': 'RAID-DP',
+                    'collection_time': datetime.now(),
+                    'vendor': 'netapp'
+                })
+        
+        print(f"  Collected {len(records)} aggregates from {len(devices)} devices")
+        return pd.DataFrame(records)
+```
+
+## 9. **`dvl/netbackupHelper.py`**
+
+```python
+"""
+NetBackup data collector module.
+"""
+
+import pandas as pd
+from typing import Dict, List, Any
+from datetime import datetime
+
+from dvl.logHelper import setup_logger, log_execution_time
+from dvl.functionHelper import (simulate_processing, print_collection_step)
+
+
+class NetBackupCollector:
+    """Collector for NetBackup systems."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = setup_logger(__name__)
+        self.timeout = config['settings'].get('timeout', 30)
+        self.max_workers = config['settings'].get('max_workers', 10)
+    
+    def get_function_names(self) -> List[str]:
+        return ['jobs', 'policies']
+    
+    @log_execution_time
+    def collect_all_devices(self, devices: List[Dict]) -> Dict[str, pd.DataFrame]:
+        """
+        Collect data from all NetBackup systems.
+        """
+        results = {}
+        
+        print(f"\n[NetBackup] Starting collection ({len(devices)} devices)")
+        
+        if not devices:
+            print("  No NetBackup systems configured")
+        
+        # Function 1: jobs
+        print_collection_step("netbackup", "jobs", len(devices))
+        results['jobs'] = self.collect_jobs(devices)
+        
+        # Function 2: policies
+        print_collection_step("netbackup", "policies", len(devices))
+        results['policies'] = self.collect_policies(devices)
+        
+        print(f"[NetBackup] Collection complete")
+        return results
+    
+    @log_execution_time
+    def collect_jobs(self, devices: List[Dict]) -> pd.DataFrame:
+        """
+        Collect backup job information.
+        """
+        if not devices:
+            return pd.DataFrame()
+        
+        print(f"  Simulating NetBackup jobs collection...")
+        simulate_processing(0.4)
+        
+        # Create simulated dataframe
+        records = []
+        for device in devices:
+            # Simulate 5 jobs per device
+            for i in range(1, 6):
+                status = 'COMPLETED' if i % 3 != 0 else 'FAILED' if i % 5 == 0 else 'RUNNING'
+                records.append({
+                    'device_hostname': device['hostname'],
+                    'device_ip': device['ip'],
+                    'site': device.get('site', 'unknown'),
+                    'job_id': f'NBU_JOB_{i:04d}',
+                    'job_type': 'BACKUP',
+                    'policy_name': f'Policy_{i}',
+                    'client_name': f'client{i}.example.com',
+                    'status': status,
+                    'size_gb': 50 * i,
+                    'duration_minutes': 30 + (i * 5),
+                    'collection_time': datetime.now(),
+                    'vendor': 'netbackup'
+                })
+        
+        print(f"  Collected {len(records)} jobs from {len(devices)} devices")
+        return pd.DataFrame(records)
+    
+    @log_execution_time
+    def collect_policies(self, devices: List[Dict]) -> pd.DataFrame:
+        """
+        Collect backup policy information.
+        """
+        if not devices:
+            return pd.DataFrame()
+        
+        print(f"  Simulating NetBackup policies collection...")
+        simulate_processing(0.25)
+        
+        # Create simulated dataframe
+        records = []
+        for device in devices:
+            # Simulate 3 policies per device
+            for i in range(1, 4):
+                records.append({
+                    'device_hostname': device['hostname'],
+                    'device_ip': device['ip'],
+                    'site': device.get('site', 'unknown'),
+                    'policy_name': f'Backup_Policy_{i}',
+                    'policy_type': 'STANDARD',
+                    'schedule': 'DAILY',
+                    'retention_days': 30 * i,
+                    'client_count': 10 * i,
+                    'total_backups': 100 * i,
+                    'last_success': datetime.now().strftime('%Y-%m-%d'),
+                    'collection_time': datetime.now(),
+                    'vendor': 'netbackup'
+                })
+        
+        print(f"  Collected {len(records)} policies from {len(devices)} devices")
+        return pd.DataFrame(records)
+```
+
+## 10. **`dvl/ecsHelper.py`**
+
+```python
+"""
+ECS storage array data collector module.
+"""
+
+import pandas as pd
+from typing import Dict, List, Any
+from datetime import datetime
+
+from dvl.logHelper import setup_logger, log_execution_time
+from dvl.functionHelper import (simulate_processing, print_collection_step)
+
+
+class ECSCollector:
+    """Collector for ECS storage arrays."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = setup_logger(__name__)
+        self.timeout = config['settings'].get('timeout', 30)
+        self.max_workers = config['settings'].get('max_workers', 10)
+    
+    def get_function_names(self) -> List[str]:
+        return ['system_info', 'buckets']
+    
+    @log_execution_time
+    def collect_all_devices(self, devices: List[Dict]) -> Dict[str, pd.DataFrame]:
+        """
+        Collect data from all ECS devices.
+        """
+        results = {}
+        
+        print(f"\n[ECS] Starting collection ({len(devices)} devices)")
+        
+        if not devices:
+            print("  No ECS devices configured")
+        
+        # Function 1: system_info
+        print_collection_step("ecs", "system_info", len(devices))
+        results['system_info'] = self.collect_system_info(devices)
+        
+        # Function 2: buckets
+        print_collection_step("ecs", "buckets", len(devices))
+        results['buckets'] = self.collect_buckets(devices)
+        
+        print(f"[ECS] Collection complete")
+        return results
+    
+    @log_execution_time
+    def collect_system_info(self, devices: List[Dict]) -> pd.DataFrame:
+        """
+        Collect system information.
+        """
+        if not devices:
+            return pd.DataFrame()
+        
+        print(f"  Simulating ECS system info collection...")
+        simulate_processing(0.3)
+        
+        # Create simulated dataframe
+        records = []
+        for device in devices:
+            records.append({
+                'device_hostname': device['hostname'],
+                'device_ip': device['ip'],
+                'site': device.get('site', 'unknown'),
+                'model': 'ECS EX500',
+                'version': '3.6.0',
+                'serial_number': f'ECS-{device["hostname"].upper()}',
+                'total_capacity_pb': 5,
+                'used_capacity_pb': 2.5,
+                'node_count': 8,
+                'vdc_count': 1,
+                'collection_time': datetime.now(),
+                'vendor': 'ecs'
+            })
+        
+        print(f"  Collected system info from {len(records)} devices")
+        return pd.DataFrame(records)
+    
+    @log_execution_time
+    def collect_buckets(self, devices: List[Dict]) -> pd.DataFrame:
+        """
+        Collect bucket information.
+        """
+        if not devices:
+            return pd.DataFrame()
+        
+        print(f"  Simulating ECS buckets collection...")
+        simulate_processing(0.35)
+        
+        # Create simulated dataframe
+        records = []
+        for device in devices:
+            # Simulate 4 buckets per device
+            for i in range(1, 5):
+                records.append({
+                    'device_hostname': device['hostname'],
+                    'device_ip': device['ip'],
+                    'site': device.get('site', 'unknown'),
+                    'bucket_name': f'bucket-{i}',
+                    'namespace': f'ns{i}',
+                    'total_objects': 10000 * i,
+                    'total_size_gb': 1000 * i,
+                    'quota_gb': 5000 * i,
+                    'versioning_enabled': i % 2 == 0,
+                    'collection_time': datetime.now(),
+                    'vendor': 'ecs'
+                })
+        
+        print(f"  Collected {len(records)} buckets from {len(devices)} devices")
+        return pd.DataFrame(records)
+```
+
+## 11. **`dvl/datadomainHelper.py`**
+
+```python
+"""
+Data Domain storage array data collector module.
+"""
+
+import pandas as pd
+from typing import Dict, List, Any
+from datetime import datetime
+
+from dvl.logHelper import setup_logger, log_execution_time
+from dvl.functionHelper import (simulate_processing, print_collection_step)
+
+
+class DataDomainCollector:
+    """Collector for Data Domain storage arrays."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.logger = setup_logger(__name__)
+        self.timeout = config['settings'].get('timeout', 30)
+        self.max_workers = config['settings'].get('max_workers', 10)
+    
+    def get_function_names(self) -> List[str]:
+        return ['system_info', 'mtrees']
+    
+    @log_execution_time
+    def collect_all_devices(self, devices: List[Dict]) -> Dict[str, pd.DataFrame]:
+        """
+        Collect data from all Data Domain devices.
+        """
+        results = {}
+        
+        print(f"\n[DataDomain] Starting collection ({len(devices)} devices)")
+        
+        if not devices:
+            print("  No DataDomain devices configured")
+        
+        # Function 1: system_info
+        print_collection_step("datadomain", "system_info", len(devices))
+        results['system_info'] = self.collect_system_info(devices)
+        
+        # Function 2: mtrees
+        print_collection_step("datadomain", "mtrees", len(devices))
+        results['mtrees'] = self.collect_mtrees(devices)
+        
+        print(f"[DataDomain] Collection complete")
+        return results
+    
+    @log_execution_time
+    def collect_system_info(self, devices: List[Dict]) -> pd.DataFrame:
+        """
+        Collect system information.
+        """
+        if not devices:
+            return pd.DataFrame()
+        
+        print(f"  Simulating DataDomain system info collection...")
+        simulate_processing(0.25)
+        
+        # Create simulated dataframe
+        records = []
+        for device in devices:
+            records.append({
+                'device_hostname': device['hostname'],
+                'device_ip': device['ip'],
+                'site': device.get('site', 'unknown'),
+                'model': 'DD9900',
+                'version': '7.10.0.0',
+                'serial_number': f'DD-{device["hostname"].upper()}',
+                'total_capacity_tb': 1000,
+                'used_capacity_tb': 450,
+                'deduplication_ratio': 25.5,
+                'compression_ratio': 3.2,
+                'collection_time': datetime.now(),
+                'vendor': 'datadomain'
+            })
+        
+        print(f"  Collected system info from {len(records)} devices")
+        return pd.DataFrame(records)
+    
+    @log_execution_time
+    def collect_mtrees(self, devices: List[Dict]) -> pd.DataFrame:
+        """
+        Collect mtree information.
+        """
+        if not devices:
+            return pd.DataFrame()
+        
+        print(f"  Simulating DataDomain mtrees collection...")
+        simulate_processing(0.3)
+        
+        # Create simulated dataframe
+        records = []
+        for device in devices:
+            # Simulate 3 mtrees per device
+            for i in range(1, 4):
+                records.append({
+                    'device_hostname': device['hostname'],
+                    'device_ip': device['ip'],
+                    'site': device.get('site', 'unknown'),
+                    'mtree_name': f'/data/col{device["hostname"][-2:]}/mtree{i}',
+                    'total_size_gb': 50000 * i,
+                    'used_size_gb': 20000 * i,
+                    'logical_size_gb': 100000 * i,  # After deduplication
+                    'deduplication_ratio': 20 + i,
+                    'retention_days': 30 * i,
+                    'collection_time': datetime.now(),
+                    'vendor': 'datadomain'
+                })
+        
+        print(f"  Collected {len(records)} mtrees from {len(devices)} devices")
+        return pd.DataFrame(records)
+```
+
+## 12. **`dvl/reportHelper.py`**
 
 ```python
 """
@@ -1326,331 +1536,273 @@ Report generation and dataframe consolidation module.
 """
 
 import pandas as pd
-import numpy as np
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 from datetime import datetime
-import os
-
-from dvl.logHelper import setup_logger, log_execution_time
 
 
 class ReportGenerator:
     """Generate consolidated reports from collected data."""
     
     def __init__(self, collected_data: Dict[str, Dict[str, pd.DataFrame]]):
-        """
-        Initialize report generator.
-        
-        Args:
-            collected_data: Dictionary of collected data by vendor and function
-        """
         self.data = collected_data
-        self.logger = setup_logger(__name__)
-        
-    @log_execution_time
+    
     def generate_all_reports(self) -> Dict[str, pd.DataFrame]:
         """
         Generate all consolidated reports.
-        
-        Returns:
-            Dictionary of report dataframes keyed by report name
         """
         reports = {}
         
+        print("\n" + "="*50)
+        print("GENERATING REPORTS")
+        print("="*50)
+        
         # Generate cross-vendor reports
         reports['capacity_summary'] = self.generate_capacity_summary()
-        reports['device_health'] = self.generate_device_health_report()
-        reports['performance_summary'] = self.generate_performance_summary()
-        reports['alerts_summary'] = self.generate_alerts_summary()
+        print(f"  Generated capacity_summary: {len(reports['capacity_summary'])} records")
+        
+        reports['device_summary'] = self.generate_device_summary()
+        print(f"  Generated device_summary: {len(reports['device_summary'])} records")
+        
+        reports['vendor_summary'] = self.generate_vendor_summary()
+        print(f"  Generated vendor_summary: {len(reports['vendor_summary'])} records")
         
         # Generate vendor-specific reports
         for vendor in self.data.keys():
-            vendor_report = self.generate_vendor_report(vendor)
-            if not vendor_report.empty:
-                reports[f'{vendor}_summary'] = vendor_report
+            if any(not df.empty for df in self.data[vendor].values()):
+                report_name = f"{vendor}_details"
+                reports[report_name] = self.generate_vendor_details(vendor)
+                if not reports[report_name].empty:
+                    print(f"  Generated {report_name}: {len(reports[report_name])} records")
         
-        self.logger.info(f"Generated {len(reports)} reports")
+        print("="*50)
         return reports
     
-    @log_execution_time
     def generate_capacity_summary(self) -> pd.DataFrame:
         """
-        Generate cross-vendor capacity summary report.
-        
-        Returns:
-            Dataframe with capacity information
+        Generate capacity summary across all vendors.
         """
-        capacity_records = []
+        records = []
         
         for vendor, vendor_data in self.data.items():
-            # Look for capacity-related dataframes
-            for func_name, dataframe in vendor_data.items():
-                if not dataframe.empty:
-                    # Check for capacity columns (vendor-specific)
-                    if 'total_capacity_gb' in dataframe.columns:
-                        for _, row in dataframe.iterrows():
-                            record = {
-                                'vendor': vendor,
-                                'device_hostname': row.get('device_hostname', ''),
-                                'device_ip': row.get('device_ip', ''),
-                                'site': row.get('site', ''),
-                                'total_capacity_gb': row.get('total_capacity_gb', 0),
-                                'used_capacity_gb': row.get('used_capacity_gb', 0),
-                                'free_capacity_gb': row.get('free_capacity_gb', 0),
-                                'utilization_percent': 0
-                            }
-                            
-                            # Calculate utilization
-                            if record['total_capacity_gb'] > 0:
-                                record['utilization_percent'] = (
-                                    record['used_capacity_gb'] / record['total_capacity_gb'] * 100
-                                )
-                            
-                            capacity_records.append(record)
-        
-        df = pd.DataFrame(capacity_records)
-        
-        if not df.empty:
-            # Add summary statistics
-            summary_stats = df.groupby('vendor').agg({
-                'total_capacity_gb': 'sum',
-                'used_capacity_gb': 'sum',
-                'free_capacity_gb': 'sum',
-                'device_hostname': 'count'
-            }).rename(columns={'device_hostname': 'device_count'})
-            
-            # Calculate overall utilization
-            summary_stats['overall_utilization_percent'] = (
-                summary_stats['used_capacity_gb'] / summary_stats['total_capacity_gb'] * 100
-            ).round(2)
-            
-            summary_stats = summary_stats.reset_index()
-            
-            # Merge summary with detailed data
-            return pd.concat([df, summary_stats.assign(is_summary=True)], ignore_index=True)
-        
-        return df
-    
-    @log_execution_time
-    def generate_device_health_report(self) -> pd.DataFrame:
-        """
-        Generate device health status report.
-        
-        Returns:
-            Dataframe with health information
-        """
-        health_records = []
-        
-        for vendor, vendor_data in self.data.items():
-            for func_name, dataframe in vendor_data.items():
-                if not dataframe.empty:
-                    # Look for health-related columns
-                    health_columns = ['health_score', 'health_status', 'status', 'alerts']
+            for func_name, df in vendor_data.items():
+                if not df.empty:
+                    # Look for capacity columns
+                    capacity_cols = ['total_capacity_gb', 'total_capacity_tb', 'total_capacity_pb',
+                                   'used_capacity_gb', 'used_capacity_tb', 'used_capacity_pb']
                     
-                    for col in health_columns:
-                        if col in dataframe.columns:
-                            for _, row in dataframe.iterrows():
-                                record = {
-                                    'vendor': vendor,
-                                    'device_hostname': row.get('device_hostname', ''),
-                                    'device_ip': row.get('device_ip', ''),
-                                    'site': row.get('site', ''),
-                                    'health_metric': col,
-                                    'health_value': row.get(col, ''),
-                                    'timestamp': row.get('timestamp', pd.Timestamp.now())
-                                }
-                                health_records.append(record)
-        
-        return pd.DataFrame(health_records)
-    
-    @log_execution_time
-    def generate_performance_summary(self) -> pd.DataFrame:
-        """
-        Generate performance metrics summary.
-        
-        Returns:
-            Dataframe with performance information
-        """
-        perf_records = []
-        
-        for vendor, vendor_data in self.data.items():
-            # Check for performance dataframes
-            if 'performance' in vendor_data:
-                perf_df = vendor_data['performance']
-                if not perf_df.empty:
-                    # Vendor-specific performance parsing
-                    if vendor == 'purestorage':
-                        # Parse Pure Storage performance
-                        pass
-                    elif vendor == 'powermax':
-                        # Parse PowerMax performance
-                        pass
-        
-        return pd.DataFrame(perf_records)
-    
-    @log_execution_time
-    def generate_alerts_summary(self) -> pd.DataFrame:
-        """
-        Generate alerts summary report.
-        
-        Returns:
-            Dataframe with alert information
-        """
-        alert_records = []
-        
-        for vendor, vendor_data in self.data.items():
-            if 'alerts' in vendor_data:
-                alert_df = vendor_data['alerts']
-                if not alert_df.empty:
-                    # Standardize alert records
-                    for _, row in alert_df.iterrows():
+                    for _, row in df.iterrows():
                         record = {
                             'vendor': vendor,
-                            'device_hostname': row.get('device_hostname', ''),
-                            'device_ip': row.get('device_ip', ''),
-                            'site': row.get('site', ''),
-                            'alert_severity': row.get('severity', row.get('level', '')),
-                            'alert_message': row.get('message', row.get('description', '')),
-                            'alert_timestamp': row.get('timestamp', row.get('created', '')),
-                            'acknowledged': row.get('acknowledged', False),
-                            'resolved': row.get('resolved', False)
+                            'device': row.get('device_hostname', 'unknown'),
+                            'function': func_name
                         }
-                        alert_records.append(record)
+                        
+                        # Add capacity values
+                        for col in capacity_cols:
+                            if col in row:
+                                record[col] = row[col]
+                        
+                        if len(record) > 3:  # More than just vendor, device, function
+                            records.append(record)
         
-        return pd.DataFrame(alert_records)
+        return pd.DataFrame(records)
     
-    @log_execution_time
-    def generate_vendor_report(self, vendor: str) -> pd.DataFrame:
+    def generate_device_summary(self) -> pd.DataFrame:
         """
-        Generate vendor-specific summary report.
+        Generate device-level summary.
+        """
+        records = []
         
-        Args:
-            vendor: Vendor name
+        for vendor, vendor_data in self.data.items():
+            device_data = {}
             
-        Returns:
-            Dataframe with vendor-specific summary
+            for func_name, df in vendor_data.items():
+                if not df.empty:
+                    for _, row in df.iterrows():
+                        device = row.get('device_hostname', 'unknown')
+                        if device not in device_data:
+                            device_data[device] = {
+                                'vendor': vendor,
+                                'device': device,
+                                'ip': row.get('device_ip', ''),
+                                'site': row.get('site', 'unknown'),
+                                'functions': [],
+                                'collection_time': row.get('collection_time', datetime.now())
+                            }
+                        
+                        if func_name not in device_data[device]['functions']:
+                            device_data[device]['functions'].append(func_name)
+            
+            for device_info in device_data.values():
+                device_info['function_count'] = len(device_info['functions'])
+                device_info['functions'] = ', '.join(device_info['functions'])
+                records.append(device_info)
+        
+        return pd.DataFrame(records)
+    
+    def generate_vendor_summary(self) -> pd.DataFrame:
+        """
+        Generate vendor-level summary.
+        """
+        records = []
+        
+        for vendor, vendor_data in self.data.items():
+            device_count = 0
+            total_records = 0
+            functions_with_data = []
+            
+            for func_name, df in vendor_data.items():
+                if not df.empty:
+                    total_records += len(df)
+                    functions_with_data.append(func_name)
+                    
+                    # Count unique devices
+                    if 'device_hostname' in df.columns:
+                        device_count = max(device_count, df['device_hostname'].nunique())
+            
+            records.append({
+                'vendor': vendor,
+                'device_count': device_count,
+                'total_records': total_records,
+                'functions_with_data': ', '.join(functions_with_data) if functions_with_data else 'None',
+                'collection_time': datetime.now()
+            })
+        
+        return pd.DataFrame(records)
+    
+    def generate_vendor_details(self, vendor: str) -> pd.DataFrame:
+        """
+        Generate detailed report for a specific vendor.
         """
         if vendor not in self.data:
             return pd.DataFrame()
         
         vendor_data = self.data[vendor]
-        summary_records = []
+        records = []
         
-        # Collect key metrics from each dataframe
-        for func_name, dataframe in vendor_data.items():
-            if not dataframe.empty:
-                # Count records per device
-                device_counts = dataframe.groupby('device_hostname').size().reset_index(name=f'{func_name}_count')
-                
-                # Get latest timestamp
-                if 'timestamp' in dataframe.columns:
-                    latest_times = dataframe.groupby('device_hostname')['timestamp'].max().reset_index(name=f'{func_name}_latest')
-                    device_counts = pd.merge(device_counts, latest_times, on='device_hostname', how='left')
-                
-                summary_records.append(device_counts)
+        for func_name, df in vendor_data.items():
+            if not df.empty:
+                # Add function name to each record
+                df_copy = df.copy()
+                df_copy['collection_function'] = func_name
+                records.append(df_copy)
         
-        # Merge all summaries
-        if summary_records:
-            merged_df = summary_records[0]
-            for df in summary_records[1:]:
-                merged_df = pd.merge(merged_df, df, on='device_hostname', how='outer')
-            
-            # Add vendor information
-            merged_df['vendor'] = vendor
-            return merged_df
+        if records:
+            return pd.concat(records, ignore_index=True)
         
         return pd.DataFrame()
-    
-    @log_execution_time
-    def save_reports(self, output_dir: str = "./reports"):
-        """
-        Save all reports to files.
-        
-        Args:
-            output_dir: Output directory path
-        """
-        os.makedirs(output_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        reports = self.generate_all_reports()
-        
-        for report_name, dataframe in reports.items():
-            # Save as CSV
-            csv_path = os.path.join(output_dir, f"{report_name}_{timestamp}.csv")
-            dataframe.to_csv(csv_path, index=False)
-            self.logger.info(f"Saved CSV report: {csv_path}")
-            
-            # Save as Excel if possible
-            try:
-                excel_path = os.path.join(output_dir, f"{report_name}_{timestamp}.xlsx")
-                dataframe.to_excel(excel_path, index=False)
-                self.logger.info(f"Saved Excel report: {excel_path}")
-            except ImportError:
-                self.logger.warning("Excel export requires openpyxl or xlsxwriter")
-            
-            # Save as JSON for web consumption
-            json_path = os.path.join(output_dir, f"{report_name}_{timestamp}.json")
-            dataframe.to_json(json_path, orient='records', date_format='iso')
-            self.logger.info(f"Saved JSON report: {json_path}")
 ```
 
-## Usage Examples
+## 13. **Sample `config.json`**
 
-### 1. Basic Usage
-
-```bash
-# Collect data from all devices and generate reports
-python v1.py
-
-# Collect data from specific vendor only
-python v1.py --vendor brocade
-
-# Generate reports only (requires existing data)
-python v1.py --report-only
+```json
+{
+  "inventory": {
+    "brocade": [
+      {
+        "hostname": "brocade-switch-01",
+        "ip": "10.0.0.1",
+        "username": "admin",
+        "password": "password123",
+        "ssh_port": 22,
+        "vendor": "brocade",
+        "site": "datacenter1"
+      },
+      {
+        "hostname": "brocade-switch-02",
+        "ip": "10.0.0.2",
+        "username": "admin",
+        "password": "password123",
+        "ssh_port": 22,
+        "vendor": "brocade",
+        "site": "datacenter1"
+      }
+    ],
+    "powermax": [
+      {
+        "hostname": "powermax-array-01",
+        "ip": "10.0.1.1",
+        "username": "smc",
+        "password": "password456",
+        "rest_port": 8443,
+        "vendor": "powermax",
+        "site": "datacenter1"
+      }
+    ],
+    "purestorage": [
+      {
+        "hostname": "pure-array-01",
+        "ip": "10.0.2.1",
+        "api_token": "pure-token-123",
+        "vendor": "purestorage",
+        "site": "datacenter1"
+      }
+    ],
+    "netapp": [],
+    "netbackup": [],
+    "ecs": [],
+    "datadomain": []
+  },
+  "settings": {
+    "max_workers": 10,
+    "timeout": 30,
+    "retry_attempts": 3,
+    "log_level": "INFO",
+    "output_dir": "./reports"
+  }
+}
 ```
 
-### 2. Programmatic Usage
+## How It Works:
 
-```python
-from v1 import MultiVendorCollector
+1. **Run the script**: `python v1.py`
+2. **All modules run**: All 7 vendor modules execute every time
+3. **Two functions per system**: Each vendor collects data from 2 functions
+4. **Concurrent execution**: Vendors run in parallel, but functions per device run sequentially
+5. **Real-time output**: Shows progress for each vendor and function
+6. **Summary report**: Displays collection results at the end
 
-# Initialize collector
-collector = MultiVendorCollector('config.json')
+## Sample Output:
 
-# Collect data from all devices
-results = collector.collect_all()
+```
+============================================================
+MULTI-VENDOR STORAGE DATA COLLECTOR
+Started at: 2024-01-15 14:30:00
+============================================================
 
-# Generate reports
-reports = collector.generate_reports()
+[1/2] COLLECTING DATA FROM ALL VENDORS...
 
-# Access specific report
-capacity_report = reports['capacity_summary']
-print(capacity_report.head())
+[BroCADE] Starting collection (2 devices)
+  [brocade     ] switchshow             on 2 device(s)
+  [PARALLEL] Executing get_switchshow on 2 devices with 2 workers
+  [SSH] Connecting to 10.0.0.1:22 as admin
+  [SSH] Executing: switchshow
+  [PARALLEL] ✓ Completed brocade-switch-01
+  ...
+  Collected switchshow from 2/2 devices
+
+[PowerMax] Starting collection (1 devices)
+  [powermax    ] system_info            on 1 device(s)
+  [REST] Calling GET https://10.0.1.1:8443/univmax/restapi/system
+  ...
+  
+[2/2] GENERATING REPORTS...
+
+============================================================
+COLLECTION SUMMARY
+============================================================
+
+brocade      switchshow(2) firmwareshow(2) - TOTAL: 4 records
+powermax     system_info(1) performance(1) - TOTAL: 2 records
+purestorage  array_info(1) volumes(1) - TOTAL: 2 records
+netapp       - NO DATA
+netbackup    - NO DATA
+ecs          - NO DATA
+datadomain   - NO DATA
+
+============================================================
+OVERALL: 8 records from 3 vendors
+============================================================
 ```
 
-## Key Features
-
-1. **Concurrent Execution**: Multiple vendors are processed concurrently, but commands per device run sequentially
-2. **Vendor Modules**: Each vendor has its own module with vendor-specific logic
-3. **DataFrame-Based**: All functions return pandas DataFrames for easy manipulation
-4. **Config-Driven**: All devices and credentials are stored in JSON configuration
-5. **Robust Error Handling**: Retry logic and comprehensive error handling
-6. **Comprehensive Logging**: Structured logging for debugging and auditing
-7. **Modular Design**: Easy to add new vendors or functions
-8. **Report Generation**: Consolidated reports across all vendors
-
-## Installation Requirements
-
-```bash
-pip install pandas paramiko requests numpy openpyxl
-```
-
-## Performance Optimization
-
-1. **Connection Pooling**: Reuse connections where possible
-2. **Parallel Processing**: Use ThreadPoolExecutor for I/O-bound operations
-3. **Lazy Loading**: Only load modules when needed
-4. **Memory Management**: Use generators for large datasets
-5. **Caching**: Cache frequently accessed data
-
-This implementation provides a solid foundation for collecting data from multiple storage vendors with the requested architecture. The system is scalable, maintainable, and follows best practices for enterprise-grade software.
+This complete implementation runs all modules every time with 2 functions per system, showing real-time progress and generating consolidated reports.
