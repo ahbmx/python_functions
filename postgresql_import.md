@@ -1,13 +1,26 @@
-Perfect! Let’s make a **full plug-and-play Python script** that will:
+Excellent choice — **UNLOGGED tables** are one of the biggest wins for bulk loads like this.
 
-1. Read your **Parquet file** efficiently.
-2. Automatically infer **column types** and map them to PostgreSQL types.
-3. Handle **dates** and **booleans** correctly.
-4. Drop and recreate the table `nbu_bpimagelist`.
-5. Bulk insert all **6 million rows** using **COPY**.
-6. Add indexes on `backup_id` and `client_name`.
+Below is the **full updated script**, with **UNLOGGED table support added**, while keeping:
 
-Here’s the complete ready-to-run script:
+✅ Parquet input
+✅ COPY bulk load
+✅ `synchronous_commit = OFF`
+✅ Indexes after load
+✅ Timing + throughput stats
+✅ No deprecated pandas APIs
+
+---
+
+## ⚠️ Important note about UNLOGGED tables (read once)
+
+* **Much faster inserts** (no WAL logging)
+* **Data is lost if PostgreSQL crashes or restarts**
+* Perfect for **ETL / rebuildable tables**
+* You can later convert it to a logged table if needed
+
+---
+
+## ✅ Full ready-to-run script (UNLOGGED enabled)
 
 ```python
 import pandas as pd
@@ -15,45 +28,63 @@ import psycopg2
 from psycopg2 import sql
 import tempfile
 import os
+import time
+from pandas.api.types import (
+    is_integer_dtype,
+    is_float_dtype,
+    is_bool_dtype,
+    is_datetime64_any_dtype,
+)
 
 # ========================
 # CONFIGURATION
 # ========================
-PARQUET_FILE = "big_file.parquet"  # Your parquet file
+PARQUET_FILE = "big_file.parquet"
+TABLE_NAME = "nbu_bpimagelist"
+INDEX_COLUMNS = ["backup_id", "client_name"]
+
 DB_HOST = "localhost"
 DB_PORT = 5432
 DB_NAME = "your_dbname"
 DB_USER = "your_user"
 DB_PASSWORD = "your_password"
-TABLE_NAME = "nbu_bpimagelist"
-INDEX_COLUMNS = ["backup_id", "client_name"]
+
+# ========================
+# TIMER START
+# ========================
+overall_start = time.time()
 
 # ========================
 # 1️⃣ READ PARQUET
 # ========================
 print("Reading parquet file...")
+read_start = time.time()
 df = pd.read_parquet(PARQUET_FILE)
-print(f"Dataframe loaded: {df.shape[0]} rows, {df.shape[1]} columns")
+read_time = time.time() - read_start
+
+row_count = len(df)
+print(f"Loaded {row_count:,} rows in {read_time:.2f}s")
 
 # ========================
-# 2️⃣ MAP PANDAS DTYPE → POSTGRES TYPE
+# 2️⃣ MAP PANDAS → POSTGRES TYPES
 # ========================
 dtype_mapping = {}
+
 for col, dt in df.dtypes.items():
-    if pd.api.types.is_integer_dtype(dt):
+    if is_integer_dtype(dt):
         dtype_mapping[col] = "BIGINT"
-    elif pd.api.types.is_float_dtype(dt):
+    elif is_float_dtype(dt):
         dtype_mapping[col] = "DOUBLE PRECISION"
-    elif pd.api.types.is_bool_dtype(dt):
+    elif is_bool_dtype(dt):
         dtype_mapping[col] = "BOOLEAN"
-    elif pd.api.types.is_datetime64_any_dtype(dt):
+    elif is_datetime64_any_dtype(dt):
         dtype_mapping[col] = "TIMESTAMP"
-    elif pd.api.types.is_categorical_dtype(dt) or pd.api.types.is_object_dtype(dt):
+    elif isinstance(dt, pd.CategoricalDtype):
         dtype_mapping[col] = "TEXT"
     else:
         dtype_mapping[col] = "TEXT"
 
-print("Column types mapped to PostgreSQL:")
+print("PostgreSQL column mapping:")
 for k, v in dtype_mapping.items():
     print(f"  {k}: {v}")
 
@@ -70,73 +101,138 @@ conn = psycopg2.connect(
 cur = conn.cursor()
 
 # ========================
-# 4️⃣ DROP TABLE IF EXISTS
+# 4️⃣ PERFORMANCE TUNING
 # ========================
+print("Applying performance settings...")
+cur.execute("SET synchronous_commit = OFF;")
+conn.commit()
+
+# ========================
+# 5️⃣ DROP + CREATE UNLOGGED TABLE
+# ========================
+print("Dropping existing table (if any)...")
 cur.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(sql.Identifier(TABLE_NAME)))
+
+columns_sql = ",\n".join(
+    f"{col} {dtype_mapping[col]}" for col in df.columns
+)
+
+create_table_sql = f"""
+CREATE UNLOGGED TABLE {TABLE_NAME} (
+{columns_sql}
+)
+"""
+cur.execute(create_table_sql)
 conn.commit()
-print(f"Table {TABLE_NAME} dropped if existed.")
+print("UNLOGGED table created.")
 
 # ========================
-# 5️⃣ CREATE TABLE
+# 6️⃣ COPY DATA (FASTEST)
 # ========================
-columns_sql = ",\n".join([f"{col} {dtype_mapping[col]}" for col in df.columns])
-create_table_query = f"CREATE TABLE {TABLE_NAME} (\n{columns_sql}\n)"
-cur.execute(create_table_query)
-conn.commit()
-print(f"Table {TABLE_NAME} created.")
-
-# ========================
-# 6️⃣ BULK COPY USING TEMP CSV
-# ========================
-# COPY is faster than to_sql
-print("Saving temporary CSV for COPY...")
-with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as tmpfile:
-    tmp_csv = tmpfile.name
+print("Preparing temporary CSV for COPY...")
+with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as tmp:
+    tmp_csv = tmp.name
     df.to_csv(tmp_csv, index=False)
 
-print("Copying data into PostgreSQL...")
-with open(tmp_csv, "r") as f:
-    cur.copy_expert(f"COPY {TABLE_NAME} FROM STDIN WITH CSV HEADER", f)
-conn.commit()
-print("Data copied successfully.")
+print("Starting COPY...")
+copy_start = time.time()
 
-# Delete temporary CSV
+with open(tmp_csv, "r") as f:
+    cur.copy_expert(
+        f"COPY {TABLE_NAME} FROM STDIN WITH CSV HEADER",
+        f
+    )
+
+conn.commit()
+copy_time = time.time() - copy_start
 os.remove(tmp_csv)
+
+rows_per_sec = row_count / copy_time
+
+print(f"COPY completed in {copy_time:.2f}s")
+print(f"Throughput: {rows_per_sec:,.0f} rows/sec")
 
 # ========================
 # 7️⃣ CREATE INDEXES
 # ========================
+print("Creating indexes...")
+index_start = time.time()
+
 for col in INDEX_COLUMNS:
-    cur.execute(sql.SQL("CREATE INDEX idx_{}_{} ON {} ({})").format(
-        sql.Identifier(col),
-        sql.Identifier(TABLE_NAME),
-        sql.Identifier(TABLE_NAME),
-        sql.Identifier(col)
-    ))
+    cur.execute(
+        sql.SQL("CREATE INDEX idx_{}_{} ON {} ({})").format(
+            sql.Identifier(col),
+            sql.Identifier(TABLE_NAME),
+            sql.Identifier(TABLE_NAME),
+            sql.Identifier(col),
+        )
+    )
+
 conn.commit()
-print(f"Indexes created on: {', '.join(INDEX_COLUMNS)}")
+index_time = time.time() - index_start
+print(f"Indexes created in {index_time:.2f}s")
 
 # ========================
-# 8️⃣ CLOSE CONNECTION
+# 8️⃣ RESET SETTINGS
+# ========================
+cur.execute("SET synchronous_commit = ON;")
+conn.commit()
+
+# ========================
+# 9️⃣ CLEANUP
 # ========================
 cur.close()
 conn.close()
-print("PostgreSQL connection closed. ✅ All done!")
+
+overall_time = time.time() - overall_start
+
+print("\n===== LOAD SUMMARY =====")
+print(f"Rows loaded      : {row_count:,}")
+print(f"Read time        : {read_time:.2f}s")
+print(f"COPY time        : {copy_time:.2f}s")
+print(f"Index time       : {index_time:.2f}s")
+print(f"Total time       : {overall_time:.2f}s")
+print("========================")
+print("✅ Done.")
 ```
 
 ---
 
-### **Features of this script**
+## 🚀 Expected speed improvement
 
-* Reads **Parquet** directly → no huge memory overhead compared to CSV.
-* Automatically maps **pandas types → PostgreSQL types**, including integers, floats, booleans, datetimes, and text.
-* Uses **COPY** via a temporary CSV → fastest way to load 6M rows.
-* Drops the table if it exists, creates a new one.
-* Adds **indexes** on `backup_id` and `client_name` after insert.
-* Fully plug-and-play; just update **DB credentials** and file paths.
+Compared to a normal logged table:
+
+| Technique                  | Speed gain |
+| -------------------------- | ---------- |
+| COPY vs inserts            | ~10×       |
+| `synchronous_commit = OFF` | ~1.5×      |
+| **UNLOGGED table**         | **2–3×**   |
+| Index after load           | ~2×        |
+
+For **6 million rows**, this often means:
+**single-digit seconds for COPY** on a decent server.
 
 ---
 
-If you want, I can also add **optional progress logging** so you can see how many rows are being processed during the COPY — useful for very large datasets.
+## 🔁 Optional next step (safe persistence)
 
-Do you want me to add that?
+If you want durability **after** loading:
+
+```sql
+ALTER TABLE nbu_bpimagelist SET LOGGED;
+```
+
+* Converts it to a normal table
+* One-time WAL cost
+* Keeps your fast load + safe long-term storage
+
+---
+
+If you want next-level performance, I can also:
+
+* Remove the temp CSV and **stream Parquet → COPY**
+* Use **UNLOGGED + parallel indexes**
+* Partition the table by date or client
+* Add VACUUM/ANALYZE tuning
+
+Just tell me 👍
