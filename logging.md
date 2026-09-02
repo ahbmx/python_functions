@@ -1,13 +1,13 @@
 Absolutely. I would structure this so that configHelper.py contains only configuration values, while logHelper.py owns all logging behavior.
 
 One useful design choice is to make the log file unique for each execution, e.g.:
-
+```python
 logs/
 ├── st_20260902_120501.log
 ├── st_20260902_121233.log
 ├── st_20260902_122010.log
 └── ...
-
+```
 
 Then logHelper.py deletes old execution logs once the configured limit is exceeded.
 
@@ -40,6 +40,8 @@ LOG_COLORS = {
 You can change these without touching your logging implementation.
 
 dvl/logHelper.py
+
+```python
 import inspect
 import logging
 import logging.handlers
@@ -315,11 +317,16 @@ def _cleanup_old_logs(log_dir, script_name, max_files):
             os.remove(old_file)
         except OSError:
             pass
+```
+
+
+
 
 st.py
 
 Then your entry-point script becomes very simple:
 
+```python
 from dvl.logHelper import setup_logger
 
 log = setup_logger()
@@ -332,10 +339,10 @@ log.success("Operation completed successfully")
 log.warning("Something looks unusual")
 log.system("System-level event")
 log.error("Something went wrong")
-
+```
 
 And in dbHelper.py:
-
+```python
 import logging
 
 log = logging.getLogger(__name__)
@@ -344,10 +351,10 @@ log = logging.getLogger(__name__)
 def connect():
     log.info("Connecting to database")
     log.success("Database connection established")
-
+```
 
 Similarly, reporthelper.py:
-
+```python
 import logging
 
 log = logging.getLogger(__name__)
@@ -356,31 +363,31 @@ log = logging.getLogger(__name__)
 def generate_report():
     log.command("Generating report")
     log.success("Report generated")
-
+```
 The resulting output
 
 With:
-
+```python
 LOG_OUTPUT = "console"
 LOG_LEVEL = "debug"
-
+```
 
 you'll get something along the lines of:
-
+```python
 2026-09-02 12:15:01,123 | DEBUG    | __main__        | Starting application
 2026-09-02 12:15:01,124 | INFO     | __main__        | Loading configuration
 2026-09-02 12:15:01,125 | PLATFORM | dvl.dbHelper    | Connected to platform
 2026-09-02 12:15:01,126 | COMMAND  | dvl.reporthelper | Generating report
 2026-09-02 12:15:01,127 | SUCCESS  | dvl.reporthelper | Report generated
-
+```
 
 The %(name)s is what gives you:
-
+```python
 __main__
 dvl.dbHelper
 dvl.reporthelper
 dvl.configHelper
-
+```
 
 automatically.
 
@@ -389,23 +396,23 @@ One thing I'd change from your original idea
 I wouldn't import configHelper into every module just to get the logger.
 
 Use this pattern everywhere except your entry point:
-
+```python
 import logging
 
 log = logging.getLogger(__name__)
-
+```
 
 Only st.py needs:
-
+```python
 from dvl.logHelper import setup_logger
 
 log = setup_logger()
-
+```
 
 setup_logger() configures the global logging system, and all the other modules automatically inherit that configuration.
 
 Also, because your custom levels are deliberately positioned between the standard levels:
-
+```python
 DEBUG       10
 INFO        20
 PLATFORM    24
@@ -415,12 +422,12 @@ WARNING     30
 SYSTEM      35
 ERROR       40
 CRITICAL    50
-
+```
 
 you can do useful filtering. For example, setting:
-
+```python
 LOG_LEVEL = "command"
-
+```
 
 will show COMMAND, SUCCESS, WARNING, SYSTEM, ERROR, and CRITICAL, but not INFO, PLATFORM, or DEBUG.
 
