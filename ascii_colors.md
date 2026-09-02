@@ -1,4 +1,4 @@
-Here's a Python helper function that displays all ASCII color combinations with foreground and background:
+You're right! The issue is that the escape sequences need to be interpreted by the terminal, but when we print them with double backslashes (`\\033`), they're printed as literal text. Let me fix this so the colors actually display:
 
 ```python
 def show_ascii_colors():
@@ -58,6 +58,8 @@ def show_ascii_colors():
         'strikethrough': 9
     }
     
+    RESET = '\033[0m'
+    
     print("=" * 80)
     print("ASCII COLOR CODES - Foreground & Background Combinations")
     print("=" * 80)
@@ -69,7 +71,8 @@ def show_ascii_colors():
     print("\n🔤 FOREGROUND COLORS ONLY:")
     print("-" * 40)
     for name, code in colors.items():
-        print(f"\\033[{code}m{name:15} \\033[0m  Code: {code}")
+        # Display the color AND show the code
+        print(f"\033[{code}m{name:15} \033[0m  Code: {code}")
     
     print("\n" + "-" * 80)
     
@@ -77,7 +80,7 @@ def show_ascii_colors():
     print("\n🔤 BACKGROUND COLORS ONLY:")
     print("-" * 40)
     for name, code in bg_colors.items():
-        print(f"\\033[{code}m{name:15} \\033[0m  Code: {code}")
+        print(f"\033[{code}m{name:15} \033[0m  Code: {code}")
     
     print("\n" + "-" * 80)
     
@@ -85,7 +88,7 @@ def show_ascii_colors():
     print("\n🔤 TEXT STYLES:")
     print("-" * 40)
     for name, code in styles.items():
-        print(f"\\033[{code}m{name:15} \\033[0m  Code: {code}")
+        print(f"\033[{code}m{name:15} \033[0m  Code: {code}")
     
     print("\n" + "-" * 80)
     
@@ -101,7 +104,8 @@ def show_ascii_colors():
             fg_code = colors[fg_name]
             bg_code = bg_colors[bg_name]
             text = f"{fg_name} on {bg_name}"
-            print(f"\\033[{fg_code};{bg_code}m{text:20}\\033[0m  Code: {fg_code};{bg_code}")
+            # Display with color AND show the code
+            print(f"\033[{fg_code};{bg_code}m{text:20}\033[0m  Code: {fg_code};{bg_code}")
         print()
     
     print("\n" + "-" * 80)
@@ -119,7 +123,8 @@ def show_ascii_colors():
         for bg_name in ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']:
             fg_code = colors[fg_name]
             bg_code = bg_colors[bg_name]
-            print(f"\\033[{fg_code};{bg_code}m  X  \\033[0m", end="")
+            # Display colored block
+            print(f"\033[{fg_code};{bg_code}m  X  \033[0m", end="")
         print()
     
     print("\n" + "=" * 80)
@@ -140,7 +145,7 @@ def get_color_code(fg_color=None, bg_color=None, style='normal'):
         style (str): Style name (e.g., 'bold', 'underline')
     
     Returns:
-        str: The complete escape sequence
+        str: The complete escape sequence (ready to use)
     """
     colors = {
         'black': 30, 'red': 31, 'green': 32, 'yellow': 33,
@@ -173,7 +178,8 @@ def get_color_code(fg_color=None, bg_color=None, style='normal'):
     if bg_color and bg_color in bg_colors:
         codes.append(str(bg_colors[bg_color]))
     
-    return f"\\033[{';'.join(codes)}m"
+    # Return the actual escape sequence (not escaped)
+    return f"\033[{';'.join(codes)}m"
 
 
 def print_colored(text, fg_color=None, bg_color=None, style='normal'):
@@ -187,13 +193,26 @@ def print_colored(text, fg_color=None, bg_color=None, style='normal'):
         style (str): Style name
     """
     code = get_color_code(fg_color, bg_color, style)
-    print(f"{code}{text}\\033[0m")
-    print(f"Code used: {code}")
+    reset = '\033[0m'
+    print(f"{code}{text}{reset}")
+    # Show the code that was used (escaped for display)
+    display_code = code.replace('\033', '\\033')
+    print(f"Code used: {display_code}")
+
+
+def show_code_only(fg_color=None, bg_color=None, style='normal'):
+    """
+    Just show the escape code without applying it.
+    Useful for copying.
+    """
+    code = get_color_code(fg_color, bg_color, style)
+    display_code = code.replace('\033', '\\033')
+    print(f"Copy this: {display_code}")
 
 
 # Example usage
 if __name__ == "__main__":
-    # Show all available colors
+    # Show all available colors (with actual colors displayed)
     show_ascii_colors()
     
     print("\n" + "=" * 80)
@@ -210,46 +229,39 @@ if __name__ == "__main__":
     print_colored("This is underlined cyan text", 
                   fg_color='cyan', style='underline')
     
-    # Example 2: Direct usage
-    print("\nDirect usage examples:")
+    # Example 2: Show code only (for copying)
+    print("\n" + "-" * 40)
+    print("COPY THESE CODES:")
+    print("-" * 40)
+    show_code_only('red', 'green', 'bold')
+    show_code_only('bright_blue', 'yellow')
+    show_code_only('cyan', None, 'underline')
+    
+    # Example 3: Direct usage
+    print("\nDirect usage examples (copy these):")
     print("\\033[1;31;42mBold Red on Green\\033[0m")
     print("\\033[4;36mUnderlined Cyan\\033[0m")
     print("\\033[93;44mBright Yellow on Blue\\033[0m")
     
-    # Example 3: Show a specific code
-    code = get_color_code('magenta', 'cyan', 'bold')
-    print(f"\nCode for bold magenta on cyan: {code}")
+    # Example 4: Get code as variable
+    my_code = get_color_code('magenta', 'cyan', 'bold')
+    print(f"\n{my_code}This is bold magenta on cyan{'\033[0m'}")
+    print(f"Code used: {my_code.replace('\033', '\\033')}")
 ```
 
-## How to use:
+The key changes:
+1. **Removed double backslashes** - Now using `\033` (actual escape character) instead of `\\033` (literal backslash)
+2. **Added RESET variable** - Using `\033[0m` to reset colors after each display
+3. **Both display AND show codes** - The text displays in color, and the code is shown next to it
+4. **Added `show_code_only()`** - A helper to just display the code you need to copy
 
-1. **Show all colors**: Just call `show_ascii_colors()` to see everything available
+Now when you run this, you'll see:
+- ✅ Actual colors displayed in your terminal
+- ✅ The escape codes shown next to each color for easy copying
+- ✅ Helper functions to generate codes for your own use
 
-2. **Get a specific color code**: 
-   ```python
-   code = get_color_code('red', 'yellow', 'bold')
-   print(f"{code}This is red on yellow{code}")
-   ```
-
-3. **Print colored text easily**:
-   ```python
-   print_colored("Hello World", fg_color='bright_blue', bg_color='yellow', style='bold')
-   ```
-
-4. **Direct usage** in your strings:
-   ```python
-   print("\033[1;31;42mBold Red on Green\033[0m")
-   ```
-
-The function displays:
-- All foreground color codes
-- All background color codes
-- All text styles (bold, underline, etc.)
-- Sample combinations
-- A complete grid of all foreground/background combinations
-- The exact escape codes you can copy and paste
-
-The codes follow the format: `\033[style;foreground;backgroundm` where:
-- `style`: 0=normal, 1=bold, 4=underline, etc.
-- `foreground`: 30-37 (normal), 90-97 (bright)
-- `background`: 40-47 (normal), 100-107 (bright)
+To copy a code, just look at what's displayed next to the colored text. For example, you'll see something like:
+```
+red              Code: 31        (with red text)
+Bold Red on Green Code: 1;31;42  (with bold red on green text)
+```
