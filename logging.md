@@ -13,7 +13,7 @@ Then logHelper.py deletes old execution logs once the configured limit is exceed
 
 dvl/configHelper.py
 # Logging configuration
-
+```python
 LOG_OUTPUT = "console"       # "console" or "file"
 
 LOG_DIR = "logs"
@@ -35,7 +35,7 @@ LOG_COLORS = {
     "critical": "\033[91m",    # Bright red
     "reset": "\033[0m",
 }
-
+```
 
 You can change these without touching your logging implementation.
 
