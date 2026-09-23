@@ -1,88 +1,14 @@
-If you want to **download the libraries locally using PowerShell** for an offline/self-hosted web application, you can use `Invoke-WebRequest`.
-
-### Highcharts
+Add Bulma to the same `libs` structure:
 
 ```powershell
-New-Item -ItemType Directory -Force -Path ".\libs\highcharts" | Out-Null
+New-Item -ItemType Directory -Force -Path ".\libs\bulma" | Out-Null
 
 Invoke-WebRequest `
-    -Uri "https://code.highcharts.com/highcharts.js" `
-    -OutFile ".\libs\highcharts\highcharts.js"
-
-Invoke-WebRequest `
-    -Uri "https://code.highcharts.com/modules/exporting.js" `
-    -OutFile ".\libs\highcharts\exporting.js"
-
-Invoke-WebRequest `
-    -Uri "https://code.highcharts.com/modules/export-data.js" `
-    -OutFile ".\libs\highcharts\export-data.js"
-
-Invoke-WebRequest `
-    -Uri "https://code.highcharts.com/modules/accessibility.js" `
-    -OutFile ".\libs\highcharts\accessibility.js"
+    -Uri "https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css" `
+    -OutFile ".\libs\bulma\bulma.min.css"
 ```
 
-### Highcharts Dashboards
-
-```powershell
-New-Item -ItemType Directory -Force -Path ".\libs\highcharts-dashboard" | Out-Null
-
-Invoke-WebRequest `
-    -Uri "https://code.highcharts.com/dashboards/dashboards.js" `
-    -OutFile ".\libs\highcharts-dashboard\dashboards.js"
-```
-
-### Highcharts Grid
-
-```powershell
-New-Item -ItemType Directory -Force -Path ".\libs\highcharts-grid" | Out-Null
-
-Invoke-WebRequest `
-    -Uri "https://code.highcharts.com/grid/grid.js" `
-    -OutFile ".\libs\highcharts-grid\grid.js"
-```
-
-### Bootstrap
-
-For Bootstrap 5:
-
-```powershell
-New-Item -ItemType Directory -Force -Path ".\libs\bootstrap" | Out-Null
-
-Invoke-WebRequest `
-    -Uri "https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" `
-    -OutFile ".\libs\bootstrap\bootstrap.min.css"
-
-Invoke-WebRequest `
-    -Uri "https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" `
-    -OutFile ".\libs\bootstrap\bootstrap.bundle.min.js"
-```
-
-`bootstrap.bundle.min.js` already contains **Popper**, so you do not need to download Popper separately for Bootstrap 5.
-
-### DataTables.js
-
-DataTables requires jQuery.
-
-```powershell
-New-Item -ItemType Directory -Force -Path ".\libs\datatables" | Out-Null
-
-Invoke-WebRequest `
-    -Uri "https://code.jquery.com/jquery-3.7.1.min.js" `
-    -OutFile ".\libs\datatables\jquery-3.7.1.min.js"
-
-Invoke-WebRequest `
-    -Uri "https://cdn.datatables.net/2.3.5/js/dataTables.min.js" `
-    -OutFile ".\libs\datatables\dataTables.min.js"
-
-Invoke-WebRequest `
-    -Uri "https://cdn.datatables.net/2.3.5/css/dataTables.dataTables.min.css" `
-    -OutFile ".\libs\datatables\dataTables.dataTables.min.css"
-```
-
-### One PowerShell script
-
-If you want everything downloaded in one operation:
+Or add it to the combined script:
 
 ```powershell
 $root = ".\libs"
@@ -92,6 +18,7 @@ $directories = @(
     "$root\highcharts-dashboard",
     "$root\highcharts-grid",
     "$root\bootstrap",
+    "$root\bulma",
     "$root\datatables"
 )
 
@@ -124,6 +51,9 @@ $files = @{
     "$root\bootstrap\bootstrap.bundle.min.js" =
         "https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
 
+    "$root\bulma\bulma.min.css" =
+        "https://cdn.jsdelivr.net/npm/bulma@1.0.4/css/bulma.min.css"
+
     "$root\datatables\jquery-3.7.1.min.js" =
         "https://code.jquery.com/jquery-3.7.1.min.js"
 
@@ -143,24 +73,28 @@ Write-Host ""
 Write-Host "Download complete."
 ```
 
-### Important dependency note
-
-For the libraries you've listed, the basic dependency relationship is:
+This gives you:
 
 ```text
-jQuery
-   |
-   +-- DataTables
-
-Bootstrap
-   |
-   +-- Popper (included in bootstrap.bundle)
-
-Highcharts
-   |
-   +-- Highcharts Dashboards
-   |
-   +-- Highcharts Grid
+libs/
+├── bootstrap/
+│   ├── bootstrap.min.css
+│   └── bootstrap.bundle.min.js
+├── bulma/
+│   └── bulma.min.css
+├── datatables/
+│   ├── jquery-3.7.1.min.js
+│   ├── dataTables.min.js
+│   └── dataTables.dataTables.min.css
+├── highcharts/
+│   ├── highcharts.js
+│   ├── exporting.js
+│   ├── export-data.js
+│   └── accessibility.js
+├── highcharts-dashboard/
+│   └── dashboards.js
+└── highcharts-grid/
+    └── grid.js
 ```
 
-One caveat: **Highcharts Dashboards and Highcharts Grid have their own version/dependency requirements**, and the exact files needed can vary depending on whether you are using the current Highcharts distribution or a specific version. If this is for an **air-gapped/production environment**, I would recommend pinning **all versions** rather than downloading `latest`-style URLs.
+**Note:** Bootstrap and Bulma are both CSS frameworks. If you're using both in the same application, their generic class names and styles can interact, so it is generally preferable to use one framework for a given page/component rather than mixing their components indiscriminately.
